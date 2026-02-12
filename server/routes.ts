@@ -487,6 +487,7 @@ export async function registerRoutes(
   app.post("/api/admin/boulevard/import", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).send("No file uploaded");
+      const marketId = req.body.marketId ? parseInt(req.body.marketId) : null;
 
       const fileContent = fs.readFileSync(req.file.path, "utf-8");
       const records = parse(fileContent, {
@@ -495,29 +496,37 @@ export async function registerRoutes(
         trim: true,
       });
 
-      const locationsWithMarket = await storage.getLocationsWithMarket();
+      const allMarkets = await storage.getMarkets();
       let imported = 0;
+      let skippedNonCash = 0;
+      let skippedNoMarket = 0;
 
       for (const record of records) {
-        // Try to match common column names
-        const dateStr = record.date || record.Date || record.transaction_date || record["Transaction Date"] || "";
-        const locationStr = record.location || record.Location || record.location_name || record["Location Name"] || "";
-        const appointmentId = record.appointment_id || record["Appointment ID"] || record.appointmentId || "";
-        const amountStr = record.amount || record.Amount || record.total || record.Total || "0";
-        const staffName = record.staff || record.Staff || record.staff_name || record["Staff Name"] || "";
-        const clientName = record.client || record.Client || record.client_name || record["Client Name"] || "";
-        const paymentType = record.payment_type || record["Payment Type"] || record.paymentType || record.type || "";
+        const dateStr = record.Date || record.date || "";
+        const merchantStr = record.Merchant || record.merchant || "";
+        const orderId = record["Order #"] || record.order_id || "";
+        const clientName = record.Client || record.client || "";
+        const operatorName = record.Operator || record.operator || "";
+        const method = record.Method || record.method || "";
+        const amountStr = record.Amount || record.amount || "0";
 
-        // Skip non-cash if payment type is available
-        if (paymentType && !paymentType.toLowerCase().includes("cash")) continue;
+        if (!method.toLowerCase().includes("cash")) {
+          skippedNonCash++;
+          continue;
+        }
 
-        // Match location
-        const loc = locationsWithMarket.find(
-          (l) => l.name.toLowerCase() === locationStr.toLowerCase() ||
-                 `${l.marketName} - ${l.name}`.toLowerCase() === locationStr.toLowerCase()
-        );
+        let resolvedMarketId = marketId;
+        if (!resolvedMarketId && merchantStr) {
+          const matched = allMarkets.find(
+            (m) => m.name.toLowerCase() === merchantStr.toLowerCase()
+          );
+          if (matched) resolvedMarketId = matched.id;
+        }
 
-        if (!loc) continue;
+        if (!resolvedMarketId) {
+          skippedNoMarket++;
+          continue;
+        }
 
         const amount = parseFloat(amountStr.replace(/[^0-9.-]/g, ""));
         if (isNaN(amount) || amount === 0) continue;
@@ -527,20 +536,19 @@ export async function registerRoutes(
 
         await storage.createBoulevardTransaction({
           date,
-          locationId: loc.id,
-          appointmentId: appointmentId || null,
+          marketId: resolvedMarketId,
+          orderId: orderId || null,
           amount: amount.toFixed(2),
-          staffName: staffName || null,
+          operatorName: operatorName || null,
           clientName: clientName || null,
-          paymentType: paymentType || "cash",
+          paymentMethod: "cash",
         });
         imported++;
       }
 
-      // Clean up uploaded CSV
       fs.unlinkSync(req.file.path);
 
-      res.json({ imported, total: records.length });
+      res.json({ imported, total: records.length, skippedNonCash, skippedNoMarket });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
