@@ -79,14 +79,32 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
-  // Schedule missing end-of-shift check every 5 minutes
-  setInterval(async () => {
-    try {
-      await checkMissingEndShifts();
-    } catch (err) {
-      console.error("Missing end shift check error:", err);
+  // Schedule missing end-of-shift check daily at 9 PM Pacific Time
+  function scheduleDailyCheck() {
+    const now = new Date();
+    const pt = new Date(now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+    const target = new Date(pt);
+    target.setHours(21, 0, 0, 0);
+    if (pt >= target) {
+      target.setDate(target.getDate() + 1);
     }
-  }, 5 * 60 * 1000);
+    const ptOffset = pt.getTime() - now.getTime();
+    const msUntilTarget = target.getTime() - pt.getTime();
+
+    setTimeout(async () => {
+      try {
+        await checkMissingEndShifts();
+      } catch (err) {
+        console.error("Missing end shift check error:", err);
+      }
+      scheduleDailyCheck();
+    }, msUntilTarget);
+
+    const hours = Math.floor(msUntilTarget / 3600000);
+    const mins = Math.floor((msUntilTarget % 3600000) / 60000);
+    console.log(`Next missing-end-shift check scheduled in ${hours}h ${mins}m (9 PM PT)`);
+  }
+  scheduleDailyCheck();
 
   // ===== PUBLIC ROUTES (esthetician-facing, no auth) =====
 
