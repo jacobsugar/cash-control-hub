@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { DollarSign, ArrowRight, AlertTriangle, CheckCircle2, Wallet, Clock } from "lucide-react";
+import { DollarSign, ArrowRight, AlertTriangle, CheckCircle2, Wallet, Clock, Shield } from "lucide-react";
 import type { Esthetician, Location, Container, Market } from "@shared/schema";
 
 export default function CountPage() {
@@ -149,6 +149,15 @@ export default function CountPage() {
             >
               <Receipt className="h-4 w-4 mr-1" />
               Receipt
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate("/admin")}
+              data-testid="button-goto-admin"
+            >
+              <Shield className="h-4 w-4 mr-1" />
+              Admin
             </Button>
           </div>
         </div>
