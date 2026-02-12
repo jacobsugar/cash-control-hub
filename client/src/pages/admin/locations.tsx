@@ -64,7 +64,7 @@ export default function LocationsPage() {
       setOpenContainer(false);
       setContainerName("");
       setContainerLocation("");
-      toast({ title: "Container created" });
+      toast({ title: "Suite created" });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -86,7 +86,7 @@ export default function LocationsPage() {
     mutationFn: async (id: number) => { await apiRequest("DELETE", `/api/containers/${id}`); },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/locations-with-containers"] });
-      toast({ title: "Container deleted" });
+      toast({ title: "Suite deleted" });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -103,19 +103,19 @@ export default function LocationsPage() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold" data-testid="text-locations-title">Locations</h1>
-          <p className="text-muted-foreground">Manage locations and cash containers</p>
+          <p className="text-muted-foreground">Manage locations and suites</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <Dialog open={openContainer} onOpenChange={setOpenContainer}>
             <DialogTrigger asChild>
               <Button variant="outline" data-testid="button-add-container">
                 <Box className="mr-2 h-4 w-4" />
-                Add Container
+                Add Suite
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Add Cash Container</DialogTitle>
+                <DialogTitle>Add Suite</DialogTitle>
               </DialogHeader>
               <div className="space-y-4 mt-2">
                 <div className="space-y-2">
@@ -134,7 +134,7 @@ export default function LocationsPage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Container Name</Label>
+                  <Label>Suite Name</Label>
                   <Input
                     value={containerName}
                     onChange={(e) => setContainerName(e.target.value)}
@@ -151,7 +151,7 @@ export default function LocationsPage() {
                   })}
                   data-testid="button-submit-container"
                 >
-                  {createContainerMutation.isPending ? "Creating..." : "Create Container"}
+                  {createContainerMutation.isPending ? "Creating..." : "Create Suite"}
                 </Button>
               </div>
             </DialogContent>
@@ -198,7 +198,7 @@ export default function LocationsPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="suite">Suite (separate containers)</SelectItem>
+                      <SelectItem value="suite">Suite (separate suites)</SelectItem>
                       <SelectItem value="flagship">Flagship (pooled till, daily reset)</SelectItem>
                     </SelectContent>
                   </Select>
@@ -288,7 +288,7 @@ export default function LocationsPage() {
                     size="icon"
                     variant="ghost"
                     onClick={() => {
-                      if (confirm("Delete this location and all its containers?")) {
+                      if (confirm("Delete this location and all its suites?")) {
                         deleteLocMutation.mutate(loc.id);
                       }
                     }}
@@ -340,7 +340,7 @@ export default function LocationsPage() {
                           size="icon"
                           variant="ghost"
                           onClick={() => {
-                            if (confirm("Delete this container?")) {
+                            if (confirm("Delete this suite?")) {
                               deleteContainerMutation.mutate(c.id);
                             }
                           }}

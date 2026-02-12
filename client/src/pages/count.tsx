@@ -282,13 +282,13 @@ export default function CountPage() {
 
                 {selectedLocation && containers && containers.length > 1 && (
                   <div className="space-y-2">
-                    <Label htmlFor="container">Cash Container</Label>
+                    <Label htmlFor="container">Suite</Label>
                     {loadingContainers ? (
                       <Skeleton className="h-9 w-full" />
                     ) : (
                       <Select value={selectedContainer} onValueChange={setSelectedContainer}>
                         <SelectTrigger id="container" data-testid="select-container">
-                          <SelectValue placeholder="Select container" />
+                          <SelectValue placeholder="Select suite" />
                         </SelectTrigger>
                         <SelectContent>
                           {containers?.map((c) => (

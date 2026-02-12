@@ -272,13 +272,13 @@ export default function ReceiptUploadPage() {
 
             {selectedLocation && containers && containers.length > 1 && (
               <div className="space-y-2">
-                <Label>Cash Container</Label>
+                <Label>Suite</Label>
                 {loadingContainers ? (
                   <Skeleton className="h-9 w-full" />
                 ) : (
                   <Select value={selectedContainer} onValueChange={setSelectedContainer}>
                     <SelectTrigger data-testid="select-receipt-container">
-                      <SelectValue placeholder="Select container" />
+                      <SelectValue placeholder="Select suite" />
                     </SelectTrigger>
                     <SelectContent>
                       {containers?.map((c) => (

@@ -35,7 +35,7 @@ export default function ShiftsPage() {
 
   const handleExport = () => {
     const csvContent = [
-      ["Date", "Staff", "Market", "Location", "Container", "Type", "Counted", "Expected", "Variance", "Note"].join(","),
+      ["Date", "Staff", "Market", "Location", "Suite", "Type", "Counted", "Expected", "Variance", "Note"].join(","),
       ...filtered.map((s) => [
         new Date(s.createdAt).toLocaleString(),
         s.estheticianName,
@@ -126,7 +126,7 @@ export default function ShiftsPage() {
                     <TableHead>Date</TableHead>
                     <TableHead>Staff</TableHead>
                     <TableHead>Location</TableHead>
-                    <TableHead>Container</TableHead>
+                    <TableHead>Suite</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead className="text-right">Counted</TableHead>
                     <TableHead className="text-right">Expected</TableHead>

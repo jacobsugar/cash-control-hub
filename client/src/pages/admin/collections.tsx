@@ -99,10 +99,10 @@ export default function CollectionsPage() {
             </DialogHeader>
             <div className="space-y-4 mt-2">
               <div className="space-y-2">
-                <Label>Container</Label>
+                <Label>Suite</Label>
                 <Select value={selectedContainer} onValueChange={setSelectedContainer}>
                   <SelectTrigger data-testid="select-collection-container">
-                    <SelectValue placeholder="Select container" />
+                    <SelectValue placeholder="Select suite" />
                   </SelectTrigger>
                   <SelectContent>
                     {containerOptions?.map((c) => (
@@ -117,7 +117,7 @@ export default function CollectionsPage() {
               {selectedContainerData && (
                 <Card>
                   <CardContent className="pt-4 pb-4">
-                    <p className="text-xs text-muted-foreground">Expected Cash in Container</p>
+                    <p className="text-xs text-muted-foreground">Expected Cash in Suite</p>
                     <p className="text-2xl font-bold text-primary" data-testid="text-expected-collection">
                       ${parseFloat(selectedContainerData.currentBalance).toFixed(2)}
                     </p>
@@ -223,7 +223,7 @@ export default function CollectionsPage() {
                   <TableRow>
                     <TableHead>Date</TableHead>
                     <TableHead>Location</TableHead>
-                    <TableHead>Container</TableHead>
+                    <TableHead>Suite</TableHead>
                     <TableHead>Collector</TableHead>
                     <TableHead className="text-right">Expected</TableHead>
                     <TableHead className="text-right">Collected</TableHead>

@@ -50,7 +50,7 @@ CashControl by Hello Sugar is a web tool for Hello Sugar salons to track and rec
 ## Data Model
 - **Markets** - Operating regions (e.g. Dallas, Houston)
 - **Locations** - Physical locations, either "suite" or "flagship" type
-- **Containers** - Cash containers (suite envelopes or flagship tills)
+- **Containers** - Suites / cash containers (suite envelopes or flagship tills). UI displays as "Suite"
 - **Estheticians** - Staff members who count cash
 - **ShiftCounts** - Start/end of shift cash count submissions
 - **Receipts** - Uploaded receipt files with amounts

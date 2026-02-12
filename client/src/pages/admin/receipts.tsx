@@ -234,7 +234,7 @@ export default function ReceiptsPage() {
                   <span>{selectedReceipt.locationName}</span>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Container</span>
+                  <span className="text-muted-foreground">Suite</span>
                   <span>{selectedReceipt.containerName}</span>
                 </div>
                 <div className="flex justify-between gap-2">

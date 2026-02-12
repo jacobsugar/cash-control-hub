@@ -111,7 +111,7 @@ export default function AdminDashboard() {
               testId="stat-receipts-today"
             />
             <StatCard
-              title="Active Containers"
+              title="Active Suites"
               value={stats?.totalContainers ?? 0}
               icon={Wallet}
               testId="stat-total-containers"
@@ -215,7 +215,7 @@ export default function AdminDashboard() {
             ) : (
               <div className="text-center py-8">
                 <Wallet className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
-                <p className="text-sm text-muted-foreground">No containers configured</p>
+                <p className="text-sm text-muted-foreground">No suites configured</p>
               </div>
             )}
           </CardContent>
