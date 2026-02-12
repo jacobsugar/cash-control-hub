@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Building2, Plus, Trash2, Box } from "lucide-react";
+import { Building2, Plus, Trash2, Box, ExternalLink, Copy } from "lucide-react";
 import type { Market, Location, Container } from "@shared/schema";
 
 interface LocationWithDetails extends Location {
@@ -295,6 +295,30 @@ export default function LocationsPage() {
                     data-testid={`button-delete-location-${loc.id}`}
                   >
                     <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2 ml-12 mb-3">
+                  <code className="text-xs bg-muted px-2 py-1 rounded-md flex-1 min-w-0 truncate" data-testid={`text-location-url-${loc.id}`}>
+                    {window.location.origin}/count/{loc.id}
+                  </code>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/count/${loc.id}`);
+                      toast({ title: "Copied", description: "Location URL copied to clipboard." });
+                    }}
+                    data-testid={`button-copy-url-${loc.id}`}
+                  >
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => window.open(`/count/${loc.id}`, "_blank")}
+                    data-testid={`button-open-url-${loc.id}`}
+                  >
+                    <ExternalLink className="h-3 w-3" />
                   </Button>
                 </div>
                 {loc.containers.length > 0 && (

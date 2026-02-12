@@ -1,6 +1,6 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, useParams } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,9 +24,12 @@ import type { Esthetician, Location, Container } from "@shared/schema";
 export default function ReceiptUploadPage() {
   const { toast } = useToast();
   const [, navigate] = useLocation();
+  const params = useParams<{ locationId?: string }>();
+  const locationIdParam = params?.locationId || null;
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedEsthetician, setSelectedEsthetician] = useState("");
-  const [selectedLocation, setSelectedLocation] = useState("");
+  const [selectedLocation, setSelectedLocation] = useState(locationIdParam || "");
   const [selectedContainer, setSelectedContainer] = useState("");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
@@ -46,6 +49,23 @@ export default function ReceiptUploadPage() {
     queryKey: ["/api/containers", selectedLocation],
     enabled: !!selectedLocation,
   });
+
+  useEffect(() => {
+    if (locationIdParam) {
+      setSelectedLocation(locationIdParam);
+    }
+  }, [locationIdParam]);
+
+  useEffect(() => {
+    if (containers && containers.length === 1 && !selectedContainer) {
+      setSelectedContainer(String(containers[0].id));
+    }
+  }, [containers, selectedContainer]);
+
+  const currentLocation = locations?.find((l) => String(l.id) === selectedLocation);
+  const locationLabel = currentLocation
+    ? `${currentLocation.marketName} - ${currentLocation.name}`
+    : "";
 
   const uploadMutation = useMutation({
     mutationFn: async () => {
@@ -116,7 +136,11 @@ export default function ReceiptUploadPage() {
               >
                 Upload Another Receipt
               </Button>
-              <Button variant="outline" onClick={() => navigate("/")} data-testid="button-back-count">
+              <Button
+                variant="outline"
+                onClick={() => navigate(locationIdParam ? `/count/${locationIdParam}` : "/")}
+                data-testid="button-back-count"
+              >
                 Back to Cash Count
               </Button>
             </div>
@@ -130,7 +154,12 @@ export default function ReceiptUploadPage() {
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card">
         <div className="mx-auto max-w-lg px-4 py-4 flex items-center gap-3 flex-wrap">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/")} data-testid="button-back-home">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => navigate(locationIdParam ? `/count/${locationIdParam}` : "/")}
+            data-testid="button-back-home"
+          >
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
@@ -141,6 +170,11 @@ export default function ReceiptUploadPage() {
       </header>
 
       <main className="mx-auto max-w-lg px-4 py-6 space-y-4">
+        {locationIdParam && locationLabel && (
+          <p className="text-sm text-muted-foreground" data-testid="text-receipt-location-label">
+            {locationLabel}
+          </p>
+        )}
         <Card>
           <CardContent className="pt-6 space-y-4">
             <div className="space-y-2">
@@ -163,33 +197,35 @@ export default function ReceiptUploadPage() {
               )}
             </div>
 
-            <div className="space-y-2">
-              <Label>Location</Label>
-              {loadingLoc ? (
-                <Skeleton className="h-9 w-full" />
-              ) : (
-                <Select
-                  value={selectedLocation}
-                  onValueChange={(val) => {
-                    setSelectedLocation(val);
-                    setSelectedContainer("");
-                  }}
-                >
-                  <SelectTrigger data-testid="select-receipt-location">
-                    <SelectValue placeholder="Select location" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {locations?.map((l) => (
-                      <SelectItem key={l.id} value={String(l.id)}>
-                        {l.marketName} - {l.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
+            {!locationIdParam && (
+              <div className="space-y-2">
+                <Label>Location</Label>
+                {loadingLoc ? (
+                  <Skeleton className="h-9 w-full" />
+                ) : (
+                  <Select
+                    value={selectedLocation}
+                    onValueChange={(val) => {
+                      setSelectedLocation(val);
+                      setSelectedContainer("");
+                    }}
+                  >
+                    <SelectTrigger data-testid="select-receipt-location">
+                      <SelectValue placeholder="Select location" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {locations?.map((l) => (
+                        <SelectItem key={l.id} value={String(l.id)}>
+                          {l.marketName} - {l.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            )}
 
-            {selectedLocation && (
+            {selectedLocation && containers && containers.length > 1 && (
               <div className="space-y-2">
                 <Label>Cash Container</Label>
                 {loadingContainers ? (

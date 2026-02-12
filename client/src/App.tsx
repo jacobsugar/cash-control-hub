@@ -64,7 +64,9 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={CountPage} />
+      <Route path="/count/:locationId" component={CountPage} />
       <Route path="/receipt" component={ReceiptUploadPage} />
+      <Route path="/receipt/:locationId" component={ReceiptUploadPage} />
       <Route path="/admin" component={AdminRouter} />
       <Route path="/admin/:rest*" component={AdminRouter} />
       <Route component={NotFound} />

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, useParams } from "wouter";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,10 +17,13 @@ import type { Esthetician, Location, Container, Market } from "@shared/schema";
 export default function CountPage() {
   const { toast } = useToast();
   const [, navigate] = useLocation();
+  const params = useParams<{ locationId?: string }>();
+  const locationIdParam = params?.locationId || null;
+
   const [step, setStep] = useState<"select" | "count" | "done">("select");
   const [shiftType, setShiftType] = useState<"start" | "end">("start");
   const [selectedEsthetician, setSelectedEsthetician] = useState("");
-  const [selectedLocation, setSelectedLocation] = useState("");
+  const [selectedLocation, setSelectedLocation] = useState(locationIdParam || "");
   const [selectedContainer, setSelectedContainer] = useState("");
   const [countedAmount, setCountedAmount] = useState("");
   const [discrepancyNote, setDiscrepancyNote] = useState("");
@@ -39,6 +42,18 @@ export default function CountPage() {
     queryKey: ["/api/containers", selectedLocation],
     enabled: !!selectedLocation,
   });
+
+  useEffect(() => {
+    if (locationIdParam) {
+      setSelectedLocation(locationIdParam);
+    }
+  }, [locationIdParam]);
+
+  useEffect(() => {
+    if (containers && containers.length === 1 && !selectedContainer) {
+      setSelectedContainer(String(containers[0].id));
+    }
+  }, [containers, selectedContainer]);
 
   const priorQuery = useQuery<{ amount: string; expectedAmount: string }>({
     queryKey: ["/api/containers", selectedContainer, "prior"],
@@ -94,6 +109,11 @@ export default function CountPage() {
 
   const activeEstheticians = estheticians?.filter((e) => e.active) || [];
 
+  const currentLocation = locations?.find((l) => String(l.id) === selectedLocation);
+  const locationLabel = currentLocation
+    ? `${currentLocation.marketName} - ${currentLocation.name}`
+    : "";
+
   if (step === "done") {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -113,14 +133,20 @@ export default function CountPage() {
                   setCountedAmount("");
                   setDiscrepancyNote("");
                   setSelectedEsthetician("");
-                  setSelectedLocation("");
-                  setSelectedContainer("");
+                  if (!locationIdParam) {
+                    setSelectedLocation("");
+                  }
+                  setSelectedContainer(containers?.length === 1 ? String(containers[0].id) : "");
                 }}
                 data-testid="button-new-count"
               >
                 Submit Another Count
               </Button>
-              <Button variant="outline" onClick={() => navigate("/receipt")} data-testid="button-upload-receipt">
+              <Button
+                variant="outline"
+                onClick={() => navigate(locationIdParam ? `/receipt/${locationIdParam}` : "/receipt")}
+                data-testid="button-upload-receipt"
+              >
                 Upload a Receipt
               </Button>
             </div>
@@ -144,7 +170,7 @@ export default function CountPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => navigate("/receipt")}
+              onClick={() => navigate(locationIdParam ? `/receipt/${locationIdParam}` : "/receipt")}
               data-testid="button-goto-receipt"
             >
               <Receipt className="h-4 w-4 mr-1" />
@@ -172,6 +198,11 @@ export default function CountPage() {
           <h2 className="text-2xl font-bold" data-testid="text-page-title">
             {step === "select" ? "Start Your Count" : `${shiftType === "start" ? "Start" : "End"} of Shift`}
           </h2>
+          {locationIdParam && locationLabel && (
+            <p className="text-sm text-muted-foreground mt-1" data-testid="text-location-label">
+              {locationLabel}
+            </p>
+          )}
         </div>
 
         {step === "select" && (
@@ -217,34 +248,36 @@ export default function CountPage() {
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="location">Location</Label>
-                  {loadingLoc ? (
-                    <Skeleton className="h-9 w-full" />
-                  ) : (
-                    <Select
-                      value={selectedLocation}
-                      onValueChange={(val) => {
-                        setSelectedLocation(val);
-                        setSelectedContainer("");
-                      }}
-                    >
-                      <SelectTrigger id="location" data-testid="select-location">
-                        <SelectValue placeholder="Select location" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {locations?.map((l) => (
-                          <SelectItem key={l.id} value={String(l.id)}>
-                            {l.marketName} - {l.name}
-                            {l.type === "flagship" ? " (Flagship)" : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
+                {!locationIdParam && (
+                  <div className="space-y-2">
+                    <Label htmlFor="location">Location</Label>
+                    {loadingLoc ? (
+                      <Skeleton className="h-9 w-full" />
+                    ) : (
+                      <Select
+                        value={selectedLocation}
+                        onValueChange={(val) => {
+                          setSelectedLocation(val);
+                          setSelectedContainer("");
+                        }}
+                      >
+                        <SelectTrigger id="location" data-testid="select-location">
+                          <SelectValue placeholder="Select location" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {locations?.map((l) => (
+                            <SelectItem key={l.id} value={String(l.id)}>
+                              {l.marketName} - {l.name}
+                              {l.type === "flagship" ? " (Flagship)" : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
 
-                {selectedLocation && (
+                {selectedLocation && containers && containers.length > 1 && (
                   <div className="space-y-2">
                     <Label htmlFor="container">Cash Container</Label>
                     {loadingContainers ? (
