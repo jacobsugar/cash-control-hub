@@ -13,6 +13,7 @@ import type { AppSetting } from "@shared/schema";
 export default function SettingsPage() {
   const { toast } = useToast();
   const [quoApiKey, setQuoApiKey] = useState("");
+  const [quoFromNumber, setQuoFromNumber] = useState("");
 
   const { data: settings, isLoading } = useQuery<AppSetting[]>({
     queryKey: ["/api/admin/settings"],
@@ -22,6 +23,8 @@ export default function SettingsPage() {
     if (settings) {
       const quo = settings.find((s) => s.key === "quo_api_key");
       if (quo) setQuoApiKey(quo.value);
+      const fromNum = settings.find((s) => s.key === "quo_from_number");
+      if (fromNum) setQuoFromNumber(fromNum.value);
     }
   }, [settings]);
 
@@ -70,8 +73,24 @@ export default function SettingsPage() {
                 data-testid="input-quo-api-key"
               />
             </div>
+            <div className="space-y-2">
+              <Label>From Phone Number</Label>
+              <Input
+                type="tel"
+                value={quoFromNumber}
+                onChange={(e) => setQuoFromNumber(e.target.value)}
+                placeholder="+15551234567"
+                data-testid="input-quo-from-number"
+              />
+              <p className="text-xs text-muted-foreground">
+                The phone number SMS alerts will be sent from (must be registered with Quo).
+              </p>
+            </div>
             <Button
-              onClick={() => saveMutation.mutate({ key: "quo_api_key", value: quoApiKey })}
+              onClick={async () => {
+                await saveMutation.mutateAsync({ key: "quo_api_key", value: quoApiKey });
+                await saveMutation.mutateAsync({ key: "quo_from_number", value: quoFromNumber });
+              }}
               disabled={saveMutation.isPending}
               data-testid="button-save-settings"
             >
