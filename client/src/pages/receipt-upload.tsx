@@ -128,10 +128,12 @@ export default function ReceiptUploadPage() {
               setAmount(data.amount);
               setOcrApplied(true);
               toast({ title: "Amount detected", description: `$${data.amount} was read from your receipt. You can update it if needed.` });
+            } else {
+              toast({ title: "Could not read amount", description: "Please enter the receipt amount manually.", variant: "destructive" });
             }
           }
         } catch {
-          // OCR failed silently — user can still enter manually
+          toast({ title: "Could not read receipt", description: "Please enter the amount manually.", variant: "destructive" });
         } finally {
           if (requestId === ocrRequestIdRef.current) {
             setIsScanning(false);
@@ -139,6 +141,9 @@ export default function ReceiptUploadPage() {
         }
       } else {
         setPreview(null);
+        if (f.type === "application/pdf") {
+          toast({ title: "PDF uploaded", description: "Auto-read only works with photos. Please enter the amount manually." });
+        }
       }
     }
   };
