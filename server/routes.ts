@@ -487,7 +487,7 @@ export async function registerRoutes(
   app.post("/api/admin/boulevard/import", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).send("No file uploaded");
-      const marketId = req.body.marketId ? parseInt(req.body.marketId) : null;
+      const locationId = req.body.locationId ? parseInt(req.body.locationId) : null;
 
       const fileContent = fs.readFileSync(req.file.path, "utf-8");
       const records = parse(fileContent, {
@@ -496,10 +496,10 @@ export async function registerRoutes(
         trim: true,
       });
 
-      const allMarkets = await storage.getMarkets();
+      const locationsWithMarket = await storage.getLocationsWithMarket();
       let imported = 0;
       let skippedNonCash = 0;
-      let skippedNoMarket = 0;
+      let skippedNoLocation = 0;
 
       for (const record of records) {
         const dateStr = record.Date || record.date || "";
@@ -515,16 +515,16 @@ export async function registerRoutes(
           continue;
         }
 
-        let resolvedMarketId = marketId;
-        if (!resolvedMarketId && merchantStr) {
-          const matched = allMarkets.find(
-            (m) => m.name.toLowerCase() === merchantStr.toLowerCase()
+        let resolvedLocationId = locationId;
+        if (!resolvedLocationId && merchantStr) {
+          const matched = locationsWithMarket.find(
+            (l) => l.name.toLowerCase() === merchantStr.toLowerCase()
           );
-          if (matched) resolvedMarketId = matched.id;
+          if (matched) resolvedLocationId = matched.id;
         }
 
-        if (!resolvedMarketId) {
-          skippedNoMarket++;
+        if (!resolvedLocationId) {
+          skippedNoLocation++;
           continue;
         }
 
@@ -536,7 +536,7 @@ export async function registerRoutes(
 
         await storage.createBoulevardTransaction({
           date,
-          marketId: resolvedMarketId,
+          locationId: resolvedLocationId,
           orderId: orderId || null,
           amount: amount.toFixed(2),
           operatorName: operatorName || null,
@@ -548,7 +548,7 @@ export async function registerRoutes(
 
       fs.unlinkSync(req.file.path);
 
-      res.json({ imported, total: records.length, skippedNonCash, skippedNoMarket });
+      res.json({ imported, total: records.length, skippedNonCash, skippedNoLocation });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

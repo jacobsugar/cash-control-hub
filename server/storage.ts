@@ -105,7 +105,6 @@ export class DatabaseStorage implements IStorage {
     for (const loc of marketLocations) {
       await this.deleteLocation(loc.id);
     }
-    await db.delete(boulevardTransactions).where(eq(boulevardTransactions.marketId, id));
     await db.delete(markets).where(eq(markets.id, id));
   }
 
@@ -158,6 +157,7 @@ export class DatabaseStorage implements IStorage {
     for (const c of locationContainers) {
       await this.deleteContainer(c.id);
     }
+    await db.delete(boulevardTransactions).where(eq(boulevardTransactions.locationId, id));
     await db.delete(locations).where(eq(locations.id, id));
   }
 
@@ -340,17 +340,19 @@ export class DatabaseStorage implements IStorage {
       .select({
         id: boulevardTransactions.id,
         date: boulevardTransactions.date,
-        marketId: boulevardTransactions.marketId,
+        locationId: boulevardTransactions.locationId,
         orderId: boulevardTransactions.orderId,
         amount: boulevardTransactions.amount,
         operatorName: boulevardTransactions.operatorName,
         clientName: boulevardTransactions.clientName,
         paymentMethod: boulevardTransactions.paymentMethod,
         importedAt: boulevardTransactions.importedAt,
+        locationName: locations.name,
         marketName: markets.name,
       })
       .from(boulevardTransactions)
-      .innerJoin(markets, eq(boulevardTransactions.marketId, markets.id))
+      .innerJoin(locations, eq(boulevardTransactions.locationId, locations.id))
+      .innerJoin(markets, eq(locations.marketId, markets.id))
       .orderBy(desc(boulevardTransactions.date));
     return result;
   }
@@ -363,9 +365,7 @@ export class DatabaseStorage implements IStorage {
   async getBoulevardCashForContainer(containerId: number, since?: Date) {
     const container = await this.getContainer(containerId);
     if (!container) return 0;
-    const [location] = await db.select().from(locations).where(eq(locations.id, container.locationId));
-    if (!location) return 0;
-    const conditions = [eq(boulevardTransactions.marketId, location.marketId)];
+    const conditions = [eq(boulevardTransactions.locationId, container.locationId)];
     if (since) conditions.push(gte(boulevardTransactions.date, since));
     const result = await db
       .select({ total: sql<string>`COALESCE(SUM(${boulevardTransactions.amount}::numeric), 0)` })

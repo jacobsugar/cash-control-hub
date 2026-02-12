@@ -9,9 +9,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import { Upload, Search, Database } from "lucide-react";
-import type { BoulevardTransaction, Market } from "@shared/schema";
+import type { BoulevardTransaction, Location } from "@shared/schema";
 
 interface TransactionWithDetails extends BoulevardTransaction {
+  locationName: string;
   marketName: string;
 }
 
@@ -19,16 +20,16 @@ export default function BoulevardPage() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
-  const [marketFilter, setMarketFilter] = useState("all");
-  const [selectedMarketId, setSelectedMarketId] = useState("auto");
+  const [locationFilter, setLocationFilter] = useState("all");
+  const [selectedLocationId, setSelectedLocationId] = useState("auto");
   const [uploading, setUploading] = useState(false);
 
   const { data: transactions, isLoading } = useQuery<TransactionWithDetails[]>({
     queryKey: ["/api/admin/boulevard-transactions"],
   });
 
-  const { data: markets } = useQuery<Market[]>({
-    queryKey: ["/api/markets"],
+  const { data: locations } = useQuery<(Location & { marketName: string })[]>({
+    queryKey: ["/api/locations/with-market"],
   });
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -38,8 +39,8 @@ export default function BoulevardPage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      if (selectedMarketId !== "auto") {
-        formData.append("marketId", selectedMarketId);
+      if (selectedLocationId !== "auto") {
+        formData.append("locationId", selectedLocationId);
       }
       const res = await fetch("/api/admin/boulevard/import", {
         method: "POST",
@@ -55,7 +56,7 @@ export default function BoulevardPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/dashboard"] });
       let desc = `${result.imported} cash transactions imported from ${result.total} total rows.`;
       if (result.skippedNonCash > 0) desc += ` ${result.skippedNonCash} non-cash rows skipped.`;
-      if (result.skippedNoMarket > 0) desc += ` ${result.skippedNoMarket} rows skipped (no matching market).`;
+      if (result.skippedNoLocation > 0) desc += ` ${result.skippedNoLocation} rows skipped (no matching location).`;
       toast({ title: "Import complete", description: desc });
     } catch (err: any) {
       toast({ title: "Import failed", description: err.message, variant: "destructive" });
@@ -71,9 +72,10 @@ export default function BoulevardPage() {
       if (!(t.operatorName || "").toLowerCase().includes(q) &&
           !(t.clientName || "").toLowerCase().includes(q) &&
           !(t.orderId || "").toLowerCase().includes(q) &&
+          !(t.locationName || "").toLowerCase().includes(q) &&
           !(t.marketName || "").toLowerCase().includes(q)) return false;
     }
-    if (marketFilter !== "all" && String(t.marketId) !== marketFilter) return false;
+    if (locationFilter !== "all" && String(t.locationId) !== locationFilter) return false;
     return true;
   }) || [];
 
@@ -85,15 +87,15 @@ export default function BoulevardPage() {
           <p className="text-muted-foreground">Import and view cash transactions from Boulevard</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Select value={selectedMarketId} onValueChange={setSelectedMarketId}>
-            <SelectTrigger className="w-[180px]" data-testid="select-import-market">
-              <SelectValue placeholder="Auto-detect market" />
+          <Select value={selectedLocationId} onValueChange={setSelectedLocationId}>
+            <SelectTrigger className="w-[220px]" data-testid="select-import-location">
+              <SelectValue placeholder="Auto-detect location" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="auto">Auto-detect market</SelectItem>
-              {markets?.map((m) => (
-                <SelectItem key={m.id} value={String(m.id)}>
-                  {m.name}
+              <SelectItem value="auto">Auto-detect location</SelectItem>
+              {locations?.map((l) => (
+                <SelectItem key={l.id} value={String(l.id)}>
+                  {l.marketName} - {l.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -121,8 +123,8 @@ export default function BoulevardPage() {
           <div className="rounded-md bg-muted p-3 mb-4">
             <p className="text-sm">
               <span className="font-medium">CSV Format:</span> Columns: Date, Merchant, Order #, Client, Operator, Method, Amount.
-              Only rows with "cash" as the Method will be imported. The Merchant column is matched to your markets,
-              or you can select a specific market before uploading.
+              Only rows with "cash" as the Method will be imported. The Merchant column is matched to your location names,
+              or you can select a specific location before uploading.
             </p>
           </div>
 
@@ -137,15 +139,15 @@ export default function BoulevardPage() {
                 data-testid="input-boulevard-search"
               />
             </div>
-            <Select value={marketFilter} onValueChange={setMarketFilter}>
-              <SelectTrigger className="w-[200px]" data-testid="select-boulevard-market">
-                <SelectValue placeholder="All Markets" />
+            <Select value={locationFilter} onValueChange={setLocationFilter}>
+              <SelectTrigger className="w-[220px]" data-testid="select-boulevard-location">
+                <SelectValue placeholder="All Locations" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Markets</SelectItem>
-                {markets?.map((m) => (
-                  <SelectItem key={m.id} value={String(m.id)}>
-                    {m.name}
+                <SelectItem value="all">All Locations</SelectItem>
+                {locations?.map((l) => (
+                  <SelectItem key={l.id} value={String(l.id)}>
+                    {l.marketName} - {l.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -169,7 +171,7 @@ export default function BoulevardPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Date</TableHead>
-                    <TableHead>Market</TableHead>
+                    <TableHead>Location</TableHead>
                     <TableHead>Order #</TableHead>
                     <TableHead>Operator</TableHead>
                     <TableHead>Client</TableHead>
@@ -182,7 +184,10 @@ export default function BoulevardPage() {
                       <TableCell className="whitespace-nowrap text-sm">
                         {new Date(t.date).toLocaleDateString()}
                       </TableCell>
-                      <TableCell>{t.marketName}</TableCell>
+                      <TableCell>
+                        <span className="text-xs text-muted-foreground">{t.marketName}</span>
+                        <br />{t.locationName}
+                      </TableCell>
                       <TableCell className="font-mono text-xs">{t.orderId || "-"}</TableCell>
                       <TableCell>{t.operatorName || "-"}</TableCell>
                       <TableCell>{t.clientName || "-"}</TableCell>

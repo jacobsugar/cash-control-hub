@@ -72,7 +72,7 @@ export const receipts = pgTable("receipts", {
 export const boulevardTransactions = pgTable("boulevard_transactions", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   date: timestamp("date").notNull(),
-  marketId: integer("market_id").notNull().references(() => markets.id),
+  locationId: integer("location_id").notNull().references(() => locations.id),
   orderId: text("order_id"),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   operatorName: text("operator_name"),
