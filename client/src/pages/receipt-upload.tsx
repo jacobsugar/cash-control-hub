@@ -15,10 +15,10 @@ import {
   DollarSign,
   CheckCircle2,
   FileImage,
-  Wallet,
   X,
   ArrowLeft,
 } from "lucide-react";
+import helloSugarLogo from "@assets/Logo_for_Swag_(1)_1770876580780.png";
 import type { Esthetician, Location, Container } from "@shared/schema";
 
 export default function ReceiptUploadPage() {
@@ -162,10 +162,11 @@ export default function ReceiptUploadPage() {
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-            <Wallet className="h-4 w-4 text-primary-foreground" />
+          <img src={helloSugarLogo} alt="Hello Sugar" className="h-7 w-auto" data-testid="img-receipt-logo" />
+          <div>
+            <h1 className="text-sm font-semibold leading-tight">Upload Receipt</h1>
+            <p className="text-[10px] text-muted-foreground leading-tight">CashControl by Hello Sugar</p>
           </div>
-          <h1 className="text-lg font-semibold">Upload Receipt</h1>
         </div>
       </header>
 

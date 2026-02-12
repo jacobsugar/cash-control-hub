@@ -26,6 +26,7 @@ import {
   SidebarFooter,
   useSidebar,
 } from "@/components/ui/sidebar";
+import helloSugarLogo from "@assets/Logo_for_Swag_(1)_1770876580780.png";
 
 const mainItems = [
   { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
@@ -62,13 +63,11 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="p-4">
         <Link href="/admin" data-testid="link-admin-home" onClick={handleLinkClick}>
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-              <Wallet className="h-4 w-4 text-primary-foreground" />
-            </div>
+          <div className="flex items-center gap-3">
+            <img src={helloSugarLogo} alt="Hello Sugar" className="h-8 w-auto" data-testid="img-sidebar-logo" />
             <div>
-              <h2 className="text-sm font-semibold">CashControl</h2>
-              <p className="text-xs text-muted-foreground">Hello Sugar</p>
+              <h2 className="text-sm font-semibold tracking-tight">CashControl</h2>
+              <p className="text-[11px] text-muted-foreground leading-tight">by Hello Sugar</p>
             </div>
           </div>
         </Link>
@@ -138,7 +137,7 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="p-4">
-        <p className="text-xs text-muted-foreground">v1.0 &middot; CashControl</p>
+        <p className="text-xs text-muted-foreground">v1.0 &middot; CashControl by Hello Sugar</p>
       </SidebarFooter>
     </Sidebar>
   );

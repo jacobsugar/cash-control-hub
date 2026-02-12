@@ -1,7 +1,15 @@
-# CashControl - Hello Sugar Cash Management
+# CashControl by Hello Sugar
 
 ## Overview
-CashControl is a web tool for Hello Sugar to track and reconcile physical cash against Boulevard salon management software. It replaces the Google Form + Sheet process with a system that makes cash counting easy for estheticians, provides early detection of discrepancies, logs receipts for cash spent, and supports audits and periodic cash collections.
+CashControl by Hello Sugar is a web tool for Hello Sugar salons to track and reconcile physical cash against Boulevard salon management software. It replaces the Google Form + Sheet process with a system that makes cash counting easy for estheticians, provides early detection of discrepancies, logs receipts for cash spent, and supports audits and periodic cash collections.
+
+## Branding
+- **Name**: CashControl by Hello Sugar
+- **Primary Color**: Hello Sugar Pink (#FF4FA3 / HSL 330 72% 55%)
+- **Font**: Inter (Google Fonts)
+- **Logo**: Hello Sugar wordmark logo used in sidebar, headers, and login
+- **Design**: Clean, modern, feminine, bright - consistent with hellosugar.salon brand
+- **CSS Theme**: Defined as CSS variables in index.css (light and dark mode)
 
 ## Architecture
 - **Frontend**: React + TypeScript, Vite, TailwindCSS, shadcn/ui components, wouter routing, TanStack Query
@@ -14,7 +22,9 @@ CashControl is a web tool for Hello Sugar to track and reconcile physical cash a
 ## Key Routes
 ### Esthetician-Facing (no auth required)
 - `/` - Cash count workflow (start/end of shift)
+- `/count/:locationId` - Location-specific cash count (auto-selects location)
 - `/receipt` - Receipt upload page
+- `/receipt/:locationId` - Location-specific receipt upload (auto-selects location)
 
 ### Admin Portal (requires login via email allowlist)
 - `/admin` - Dashboard with stats overview

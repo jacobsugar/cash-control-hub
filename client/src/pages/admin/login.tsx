@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Lock } from "lucide-react";
+import helloSugarLogo from "@assets/Logo_for_Swag_(1)_1770876580780.png";
 
 export default function AdminLoginPage() {
   const [email, setEmail] = useState("");
@@ -31,10 +31,10 @@ export default function AdminLoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-            <Lock className="h-6 w-6 text-primary" />
+          <div className="mx-auto mb-4">
+            <img src={helloSugarLogo} alt="Hello Sugar" className="h-12 w-auto mx-auto" data-testid="img-login-logo" />
           </div>
-          <CardTitle data-testid="text-login-title">CashControl Admin</CardTitle>
+          <CardTitle className="text-xl" data-testid="text-login-title">CashControl Admin</CardTitle>
           <p className="text-sm text-muted-foreground mt-1">
             Enter your authorized email to access the admin portal.
           </p>

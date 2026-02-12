@@ -11,7 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { DollarSign, ArrowRight, AlertTriangle, CheckCircle2, Wallet, Clock, Shield } from "lucide-react";
+import { DollarSign, ArrowRight, AlertTriangle, CheckCircle2, Clock, Shield } from "lucide-react";
+import helloSugarLogo from "@assets/Logo_for_Swag_(1)_1770876580780.png";
 import type { Esthetician, Location, Container, Market } from "@shared/schema";
 
 export default function CountPage() {
@@ -160,11 +161,12 @@ export default function CountPage() {
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card">
         <div className="mx-auto max-w-lg px-4 py-4 flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-              <Wallet className="h-4 w-4 text-primary-foreground" />
+          <div className="flex items-center gap-3">
+            <img src={helloSugarLogo} alt="Hello Sugar" className="h-7 w-auto" data-testid="img-count-logo" />
+            <div>
+              <h1 className="text-sm font-semibold leading-tight">CashControl</h1>
+              <p className="text-[10px] text-muted-foreground leading-tight">by Hello Sugar</p>
             </div>
-            <h1 className="text-lg font-semibold">CashControl</h1>
           </div>
           <div className="flex items-center gap-2">
             <Button
