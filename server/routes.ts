@@ -286,11 +286,7 @@ export async function registerRoutes(
       await storage.deleteMarket(parseInt(req.params.id));
       res.json({ success: true });
     } catch (err: any) {
-      if (err.code === "23503") {
-        res.status(409).json({ message: "Cannot delete this market because it still has locations. Please delete or reassign its locations first." });
-      } else {
-        res.status(500).json({ message: err.message });
-      }
+      res.status(500).json({ message: err.message });
     }
   });
 
@@ -309,11 +305,7 @@ export async function registerRoutes(
       await storage.deleteLocation(parseInt(req.params.id));
       res.json({ success: true });
     } catch (err: any) {
-      if (err.code === "23503") {
-        res.status(409).json({ message: "Cannot delete this location because it still has containers or related data. Please delete its containers first." });
-      } else {
-        res.status(500).json({ message: err.message });
-      }
+      res.status(500).json({ message: err.message });
     }
   });
 
@@ -332,11 +324,7 @@ export async function registerRoutes(
       await storage.deleteContainer(parseInt(req.params.id));
       res.json({ success: true });
     } catch (err: any) {
-      if (err.code === "23503") {
-        res.status(409).json({ message: "Cannot delete this container because it has shift counts or receipts linked to it. Please remove related data first." });
-      } else {
-        res.status(500).json({ message: err.message });
-      }
+      res.status(500).json({ message: err.message });
     }
   });
 
@@ -364,11 +352,7 @@ export async function registerRoutes(
       await storage.deleteEsthetician(parseInt(req.params.id));
       res.json({ success: true });
     } catch (err: any) {
-      if (err.code === "23503") {
-        res.status(409).json({ message: "Cannot delete this esthetician because they have shift counts or receipts linked to them." });
-      } else {
-        res.status(500).json({ message: err.message });
-      }
+      res.status(500).json({ message: err.message });
     }
   });
 

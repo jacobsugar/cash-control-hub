@@ -101,6 +101,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteMarket(id: number) {
+    const marketLocations = await db.select({ id: locations.id }).from(locations).where(eq(locations.marketId, id));
+    for (const loc of marketLocations) {
+      await this.deleteLocation(loc.id);
+    }
     await db.delete(markets).where(eq(markets.id, id));
   }
 
@@ -149,7 +153,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteLocation(id: number) {
-    await db.delete(containers).where(eq(containers.locationId, id));
+    const locationContainers = await db.select({ id: containers.id }).from(containers).where(eq(containers.locationId, id));
+    for (const c of locationContainers) {
+      await this.deleteContainer(c.id);
+    }
+    await db.delete(boulevardTransactions).where(eq(boulevardTransactions.locationId, id));
     await db.delete(locations).where(eq(locations.id, id));
   }
 
@@ -190,6 +198,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteContainer(id: number) {
+    const containerReceipts = await db.select({ id: receipts.id }).from(receipts).where(eq(receipts.containerId, id));
+    const receiptIds = containerReceipts.map(r => r.id);
+    if (receiptIds.length > 0) {
+      await db.delete(alerts).where(inArray(alerts.receiptId, receiptIds));
+    }
+    const containerShifts = await db.select({ id: shiftCounts.id }).from(shiftCounts).where(eq(shiftCounts.containerId, id));
+    const shiftIds = containerShifts.map(s => s.id);
+    if (shiftIds.length > 0) {
+      await db.delete(alerts).where(inArray(alerts.shiftCountId, shiftIds));
+      await db.delete(receipts).where(inArray(receipts.shiftCountId, shiftIds));
+    }
+    await db.delete(receipts).where(eq(receipts.containerId, id));
+    await db.delete(shiftCounts).where(eq(shiftCounts.containerId, id));
+    await db.delete(cashCollections).where(eq(cashCollections.containerId, id));
     await db.delete(containers).where(eq(containers.id, id));
   }
 
@@ -208,6 +230,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteEsthetician(id: number) {
+    const esthReceipts = await db.select({ id: receipts.id }).from(receipts).where(eq(receipts.estheticianId, id));
+    const receiptIds = esthReceipts.map(r => r.id);
+    if (receiptIds.length > 0) {
+      await db.delete(alerts).where(inArray(alerts.receiptId, receiptIds));
+    }
+    const esthShifts = await db.select({ id: shiftCounts.id }).from(shiftCounts).where(eq(shiftCounts.estheticianId, id));
+    const shiftIds = esthShifts.map(s => s.id);
+    if (shiftIds.length > 0) {
+      await db.delete(alerts).where(inArray(alerts.shiftCountId, shiftIds));
+      await db.delete(receipts).where(inArray(receipts.shiftCountId, shiftIds));
+    }
+    await db.delete(receipts).where(eq(receipts.estheticianId, id));
+    await db.delete(shiftCounts).where(eq(shiftCounts.estheticianId, id));
     await db.delete(estheticians).where(eq(estheticians.id, id));
   }
 
