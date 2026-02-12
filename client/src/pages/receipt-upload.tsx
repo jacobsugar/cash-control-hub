@@ -138,7 +138,10 @@ export default function ReceiptUploadPage() {
               </Button>
               <Button
                 variant="outline"
-                onClick={() => navigate(locationIdParam ? `/count/${locationIdParam}` : "/")}
+                onClick={() => {
+                  if (locationIdParam) navigate(`/count/${locationIdParam}`);
+                }}
+                disabled={!locationIdParam}
                 data-testid="button-back-count"
               >
                 Back to Cash Count
@@ -157,7 +160,10 @@ export default function ReceiptUploadPage() {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => navigate(locationIdParam ? `/count/${locationIdParam}` : "/")}
+            onClick={() => {
+              if (locationIdParam) navigate(`/count/${locationIdParam}`);
+              else navigate("/");
+            }}
             data-testid="button-back-home"
           >
             <ArrowLeft className="h-4 w-4" />

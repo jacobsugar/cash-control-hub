@@ -21,13 +21,11 @@ CashControl by Hello Sugar is a web tool for Hello Sugar salons to track and rec
 
 ## Key Routes
 ### Esthetician-Facing (no auth required)
-- `/` - Cash count workflow (start/end of shift)
 - `/count/:locationId` - Location-specific cash count (auto-selects location)
-- `/receipt` - Receipt upload page
 - `/receipt/:locationId` - Location-specific receipt upload (auto-selects location)
 
 ### Admin Portal (requires login via email allowlist)
-- `/admin` - Dashboard with stats overview
+- `/` or `/admin` - Dashboard with stats overview (homepage is admin login)
 - `/admin/shifts` - All shift count submissions
 - `/admin/receipts` - All uploaded receipts
 - `/admin/alerts` - Alert management

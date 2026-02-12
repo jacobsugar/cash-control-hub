@@ -181,7 +181,7 @@ export default function CountPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => navigate("/admin")}
+              onClick={() => navigate("/")}
               data-testid="button-goto-admin"
             >
               <Shield className="h-4 w-4 mr-1" />

@@ -42,6 +42,7 @@ function AdminRouter() {
   return (
     <AdminLayout>
       <Switch>
+        <Route path="/" component={AdminDashboard} />
         <Route path="/admin" component={AdminDashboard} />
         <Route path="/admin/shifts" component={ShiftsPage} />
         <Route path="/admin/receipts" component={ReceiptsPage} />
@@ -63,12 +64,11 @@ function AdminRouter() {
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={CountPage} />
       <Route path="/count/:locationId" component={CountPage} />
-      <Route path="/receipt" component={ReceiptUploadPage} />
       <Route path="/receipt/:locationId" component={ReceiptUploadPage} />
       <Route path="/admin" component={AdminRouter} />
       <Route path="/admin/:rest*" component={AdminRouter} />
+      <Route path="/" component={AdminRouter} />
       <Route component={NotFound} />
     </Switch>
   );
