@@ -89,6 +89,7 @@ export default function CountPage() {
   };
 
   const hasMismatch =
+    shiftType === "start" &&
     countedAmount !== "" &&
     expectedAmount !== null &&
     parseFloat(countedAmount) !== parseFloat(expectedAmount);
@@ -103,7 +104,7 @@ export default function CountPage() {
       estheticianId: parseInt(selectedEsthetician),
       type: shiftType,
       countedAmount,
-      expectedAmount,
+      expectedAmount: shiftType === "start" ? expectedAmount : null,
       discrepancyNote: hasMismatch ? discrepancyNote : null,
     });
   };
