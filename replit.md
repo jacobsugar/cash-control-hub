@@ -17,6 +17,8 @@ CashControl by Hello Sugar is a web tool for Hello Sugar salons to track and rec
 - **Database**: PostgreSQL with Drizzle ORM
 - **File uploads**: Multer for receipt file handling (stored in /uploads directory)
 - **CSV parsing**: csv-parse for Boulevard data import
+- **OCR**: OpenAI vision (gpt-4o-mini via Replit AI Integrations) for receipt amount extraction
+- **SMS Alerts**: Quo API (api.openphone.com) for sending SMS alerts to configured recipients
 - **Auth**: Session-based email allowlist for admin portal; esthetician pages are public
 
 ## Key Routes

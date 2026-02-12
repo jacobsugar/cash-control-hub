@@ -6,6 +6,7 @@ import path from "path";
 import fs from "fs";
 import { parse } from "csv-parse/sync";
 import session from "express-session";
+import OpenAI from "openai";
 
 function formatPhoneE164(phone: string): string {
   const digits = phone.replace(/\D/g, "");
@@ -156,6 +157,70 @@ export async function registerRoutes(
     saveUninitialized: false,
     cookie: { maxAge: 24 * 60 * 60 * 1000 },
   }));
+
+  // OCR rate limiting: max 10 requests per IP per minute
+  const ocrRateMap = new Map<string, number[]>();
+  app.post("/api/ocr/receipt", upload.single("file"), async (req, res) => {
+    const ip = req.ip || "unknown";
+    const now = Date.now();
+    const windowMs = 60000;
+    const maxRequests = 10;
+    const timestamps = (ocrRateMap.get(ip) || []).filter((t) => now - t < windowMs);
+    if (timestamps.length >= maxRequests) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(429).json({ amount: null, message: "Too many requests" });
+    }
+    timestamps.push(now);
+    ocrRateMap.set(ip, timestamps);
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+
+      const filePath = req.file.path;
+      const mimeType = req.file.mimetype;
+
+      if (!mimeType.startsWith("image/")) {
+        fs.unlinkSync(filePath);
+        return res.json({ amount: null, message: "OCR only works on images, not PDFs" });
+      }
+
+      const imageBuffer = fs.readFileSync(filePath);
+      const base64Image = imageBuffer.toString("base64");
+      const dataUrl = `data:${mimeType};base64,${base64Image}`;
+
+      fs.unlinkSync(filePath);
+
+      const openai = new OpenAI({
+        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+        baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+      });
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: "You are a receipt OCR assistant. Extract the total amount from the receipt image. Return ONLY a JSON object with a single field 'amount' containing the numeric total as a string (e.g. {\"amount\": \"25.99\"}). If you cannot determine the total, return {\"amount\": null}. Do not include currency symbols in the amount. Look for fields labeled 'Total', 'Grand Total', 'Amount Due', 'Balance Due', or similar. If there are multiple totals, use the final/grand total.",
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Extract the total amount from this receipt." },
+              { type: "image_url", image_url: { url: dataUrl } },
+            ],
+          },
+        ],
+        max_completion_tokens: 100,
+        response_format: { type: "json_object" },
+      });
+
+      const content = response.choices[0]?.message?.content || "{}";
+      const parsed = JSON.parse(content);
+      res.json({ amount: parsed.amount || null });
+    } catch (err: any) {
+      console.error("OCR error:", err);
+      res.json({ amount: null, message: "Could not read receipt" });
+    }
+  });
 
   // Admin login (email-based for MVP, Google OAuth can be added later)
   app.post("/api/admin/login", async (req, res) => {

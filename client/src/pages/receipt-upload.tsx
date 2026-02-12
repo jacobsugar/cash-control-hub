@@ -17,6 +17,8 @@ import {
   FileImage,
   X,
   ArrowLeft,
+  Loader2,
+  ScanLine,
 } from "lucide-react";
 import helloSugarLogo from "@assets/Logo_for_Swag_(1)_1770876580780.png";
 import type { Esthetician, Location, Container } from "@shared/schema";
@@ -36,6 +38,9 @@ export default function ReceiptUploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [ocrApplied, setOcrApplied] = useState(false);
+  const ocrRequestIdRef = useRef(0);
 
   const { data: estheticians, isLoading: loadingEsth } = useQuery<Esthetician[]>({
     queryKey: ["/api/estheticians"],
@@ -97,14 +102,41 @@ export default function ReceiptUploadPage() {
     },
   });
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) {
       setFile(f);
+      setOcrApplied(false);
+      setAmount("");
       if (f.type.startsWith("image/")) {
         const reader = new FileReader();
         reader.onload = () => setPreview(reader.result as string);
         reader.readAsDataURL(f);
+
+        const requestId = ++ocrRequestIdRef.current;
+        setIsScanning(true);
+        try {
+          const formData = new FormData();
+          formData.append("file", f);
+          const res = await fetch("/api/ocr/receipt", {
+            method: "POST",
+            body: formData,
+          });
+          if (res.ok && requestId === ocrRequestIdRef.current) {
+            const data = await res.json();
+            if (data.amount) {
+              setAmount(data.amount);
+              setOcrApplied(true);
+              toast({ title: "Amount detected", description: `$${data.amount} was read from your receipt. You can update it if needed.` });
+            }
+          }
+        } catch {
+          // OCR failed silently — user can still enter manually
+        } finally {
+          if (requestId === ocrRequestIdRef.current) {
+            setIsScanning(false);
+          }
+        }
       } else {
         setPreview(null);
       }
@@ -131,6 +163,7 @@ export default function ReceiptUploadPage() {
                   setPreview(null);
                   setAmount("");
                   setNote("");
+                  setOcrApplied(false);
                 }}
                 data-testid="button-upload-another"
               >
@@ -290,6 +323,8 @@ export default function ReceiptUploadPage() {
                       onClick={() => {
                         setFile(null);
                         setPreview(null);
+                        setOcrApplied(false);
+                        setAmount("");
                       }}
                       data-testid="button-remove-file"
                     >
@@ -311,7 +346,21 @@ export default function ReceiptUploadPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="receipt-amount">Receipt Amount</Label>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Label htmlFor="receipt-amount">Receipt Amount</Label>
+                {isScanning && (
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground" data-testid="text-ocr-scanning">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Reading receipt...
+                  </span>
+                )}
+                {ocrApplied && !isScanning && (
+                  <span className="flex items-center gap-1 text-xs text-primary" data-testid="text-ocr-detected">
+                    <ScanLine className="h-3 w-3" />
+                    Auto-detected
+                  </span>
+                )}
+              </div>
               <div className="relative">
                 <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -322,7 +371,10 @@ export default function ReceiptUploadPage() {
                   placeholder="0.00"
                   className="pl-9 text-lg"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
+                  onChange={(e) => {
+                    setAmount(e.target.value);
+                    if (ocrApplied) setOcrApplied(false);
+                  }}
                   data-testid="input-receipt-amount"
                 />
               </div>
