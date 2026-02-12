@@ -7,6 +7,113 @@ import fs from "fs";
 import { parse } from "csv-parse/sync";
 import session from "express-session";
 
+function formatPhoneE164(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.startsWith("1") && digits.length === 11) return `+${digits}`;
+  if (digits.length === 10) return `+1${digits}`;
+  return `+${digits}`;
+}
+
+function buildAlertMessage(alertData: {
+  type: string;
+  staffName?: string | null;
+  locationName?: string | null;
+  containerName?: string | null;
+  expectedAmount?: string | null;
+  actualAmount?: string | null;
+  note?: string | null;
+}): string {
+  const loc = alertData.locationName || "Unknown location";
+  const container = alertData.containerName ? ` (${alertData.containerName})` : "";
+  const staff = alertData.staffName || "Unknown";
+
+  switch (alertData.type) {
+    case "start_mismatch":
+      return `CashControl Alert: Cash discrepancy at ${loc}${container}. Expected $${alertData.expectedAmount}, counted $${alertData.actualAmount} by ${staff}.${alertData.note ? ` Note: ${alertData.note}` : ""}`;
+    case "receipt_submitted":
+      return `CashControl: Receipt submitted at ${loc}${container} for $${alertData.actualAmount} by ${staff}.${alertData.note ? ` Note: ${alertData.note}` : ""}`;
+    case "missing_end_shift":
+      return `CashControl Alert: Missing end-of-shift count at ${loc}${container}. Started by ${staff} but no end count recorded.`;
+    case "collection_mismatch":
+      return `CashControl Alert: Collection discrepancy at ${loc}${container}. Expected $${alertData.expectedAmount}, collected $${alertData.actualAmount} by ${staff}.${alertData.note ? ` Note: ${alertData.note}` : ""}`;
+    default:
+      return `CashControl Alert: ${alertData.type} at ${loc}${container}.`;
+  }
+}
+
+async function sendAlertSms(alertData: {
+  type: string;
+  staffName?: string | null;
+  locationName?: string | null;
+  containerName?: string | null;
+  expectedAmount?: string | null;
+  actualAmount?: string | null;
+  note?: string | null;
+}) {
+  try {
+    const settings = await storage.getSettings();
+    const apiKeySetting = settings.find((s) => s.key === "quo_api_key");
+    const fromNumberSetting = settings.find((s) => s.key === "quo_from_number");
+
+    if (!apiKeySetting?.value || !fromNumberSetting?.value) {
+      console.log("SMS not sent: Quo API key or from number not configured");
+      return;
+    }
+
+    const recipients = await storage.getAlertRecipients();
+    const activeRecipients = recipients.filter((r) => r.active);
+    if (activeRecipients.length === 0) {
+      console.log("SMS not sent: No active alert recipients");
+      return;
+    }
+
+    const message = buildAlertMessage(alertData);
+    const fromNumber = formatPhoneE164(fromNumberSetting.value);
+
+    const phoneNumbersRes = await fetch("https://api.openphone.com/v1/phone-numbers", {
+      headers: { Authorization: apiKeySetting.value },
+    });
+
+    let userId: string | undefined;
+    if (phoneNumbersRes.ok) {
+      const phoneData = await phoneNumbersRes.json();
+      const matchingNumber = phoneData.data?.find((pn: any) => {
+        const formatted = formatPhoneE164(pn.formattedNumber || pn.phoneNumber || "");
+        return formatted === fromNumber;
+      });
+      userId = matchingNumber?.users?.[0]?.id;
+    }
+
+    for (const recipient of activeRecipients) {
+      const toNumber = formatPhoneE164(recipient.phoneNumber);
+      const body: any = {
+        content: message,
+        from: fromNumber,
+        to: [toNumber],
+      };
+      if (userId) body.userId = userId;
+
+      const sendRes = await fetch("https://api.openphone.com/v1/messages", {
+        method: "POST",
+        headers: {
+          Authorization: apiKeySetting.value,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (sendRes.ok) {
+        console.log(`SMS sent to ${recipient.name} (${toNumber})`);
+      } else {
+        const errText = await sendRes.text();
+        console.error(`SMS failed for ${recipient.name} (${toNumber}): ${sendRes.status} ${errText}`);
+      }
+    }
+  } catch (err) {
+    console.error("SMS sending error:", err);
+  }
+}
+
 const uploadDir = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -208,6 +315,16 @@ export async function registerRoutes(
           note: discrepancyNote,
           shiftCountId: shiftCount.id,
         });
+
+        sendAlertSms({
+          type: "start_mismatch",
+          staffName: esth?.name || null,
+          locationName: loc?.name || null,
+          containerName: container?.name || null,
+          expectedAmount,
+          actualAmount: countedAmount,
+          note: discrepancyNote,
+        });
       }
 
       res.json(shiftCount);
@@ -249,6 +366,15 @@ export async function registerRoutes(
         actualAmount: amount,
         note: note || `Receipt: ${req.file.originalname}`,
         receiptId: receipt.id,
+      });
+
+      sendAlertSms({
+        type: "receipt_submitted",
+        staffName: esth?.name || null,
+        locationName: loc?.name || null,
+        containerName: container?.name || null,
+        actualAmount: amount,
+        note: note || `Receipt: ${req.file!.originalname}`,
       });
 
       res.json(receipt);
@@ -449,6 +575,16 @@ export async function registerRoutes(
           type: "collection_mismatch",
           staffName: collectorName,
           marketName: loc?.marketName || null,
+          locationName: loc?.name || null,
+          containerName: container?.name || null,
+          expectedAmount,
+          actualAmount: collectedAmount,
+          note,
+        });
+
+        sendAlertSms({
+          type: "collection_mismatch",
+          staffName: collectorName,
           locationName: loc?.name || null,
           containerName: container?.name || null,
           expectedAmount,
@@ -681,6 +817,13 @@ async function checkMissingEndShifts() {
       containerName: startShift.containerName || null,
       shiftCountId: startShift.id,
       note: `No end-of-shift count submitted within ${maxShiftHours} hours of start`,
+    });
+
+    sendAlertSms({
+      type: "missing_end_shift",
+      staffName: startShift.estheticianName || null,
+      locationName: startShift.locationName || null,
+      containerName: startShift.containerName || null,
     });
   }
 }
