@@ -328,11 +328,24 @@ export async function registerRoutes(
       if (!container) return res.status(404).json({ message: "Container not found" });
 
       const last = await storage.getLastShiftCountForContainer(containerId);
-      const priorAmount = last?.countedAmount || container.currentBalance || "0.00";
-      const sinceDate = last?.createdAt || undefined;
+      const lastCollection = await storage.getLastCollectionForContainer(containerId);
 
-      const boulevardCash = await storage.getBoulevardCashForContainer(containerId, sinceDate ? new Date(sinceDate) : undefined);
-      const receiptSpent = await storage.getReceiptsTotalForContainer(containerId, sinceDate ? new Date(sinceDate) : undefined);
+      const shiftTime = last?.createdAt ? new Date(last.createdAt).getTime() : 0;
+      const collectionTime = lastCollection?.createdAt ? new Date(lastCollection.createdAt).getTime() : 0;
+
+      let priorAmount: string;
+      let sinceDate: Date | undefined;
+
+      if (collectionTime > shiftTime) {
+        priorAmount = "0.00";
+        sinceDate = new Date(lastCollection!.createdAt);
+      } else {
+        priorAmount = last?.countedAmount || container.currentBalance || "0.00";
+        sinceDate = last?.createdAt ? new Date(last.createdAt) : undefined;
+      }
+
+      const boulevardCash = await storage.getBoulevardCashForContainer(containerId, sinceDate);
+      const receiptSpent = await storage.getReceiptsTotalForContainer(containerId, sinceDate);
 
       const expectedAmount = (
         parseFloat(priorAmount) + boulevardCash - receiptSpent

@@ -62,6 +62,7 @@ export default function CollectionsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/collections"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/container-options"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/locations-with-containers"] });
       setOpen(false);
       setSelectedContainer("");
       setCollectedAmount("");

@@ -67,6 +67,7 @@ export interface IStorage {
   // Cash Collections
   getCollections(): Promise<any[]>;
   createCollection(data: InsertCashCollection): Promise<CashCollection>;
+  getLastCollectionForContainer(containerId: number): Promise<CashCollection | undefined>;
 
   // Admin Users
   getAdminUsers(): Promise<AdminUser[]>;
@@ -416,6 +417,16 @@ export class DatabaseStorage implements IStorage {
     return collection;
   }
 
+  async getLastCollectionForContainer(containerId: number) {
+    const [last] = await db
+      .select()
+      .from(cashCollections)
+      .where(eq(cashCollections.containerId, containerId))
+      .orderBy(desc(cashCollections.createdAt))
+      .limit(1);
+    return last;
+  }
+
   // Admin Users
   async getAdminUsers() {
     return db.select().from(adminUsers).orderBy(adminUsers.email);
@@ -490,9 +501,23 @@ export class DatabaseStorage implements IStorage {
 
     const cashPositions = await Promise.all(
       containerOpts.map(async (c) => {
-        const last = await this.getLastShiftCountForContainer(c.id);
-        const baseAmount = last?.countedAmount || c.currentBalance || "0.00";
-        const sinceDate = last?.createdAt ? new Date(last.createdAt) : undefined;
+        const lastShift = await this.getLastShiftCountForContainer(c.id);
+        const lastCollection = await this.getLastCollectionForContainer(c.id);
+
+        const shiftTime = lastShift?.createdAt ? new Date(lastShift.createdAt).getTime() : 0;
+        const collectionTime = lastCollection?.createdAt ? new Date(lastCollection.createdAt).getTime() : 0;
+
+        let baseAmount: string;
+        let sinceDate: Date | undefined;
+
+        if (collectionTime > shiftTime) {
+          baseAmount = "0.00";
+          sinceDate = new Date(lastCollection!.createdAt);
+        } else {
+          baseAmount = lastShift?.countedAmount || c.currentBalance || "0.00";
+          sinceDate = lastShift?.createdAt ? new Date(lastShift.createdAt) : undefined;
+        }
+
         const boulevardCash = await this.getBoulevardCashForContainer(c.id, sinceDate);
         const receiptSpent = await this.getReceiptsTotalForContainer(c.id, sinceDate);
         const expectedCash = (parseFloat(baseAmount) + boulevardCash - receiptSpent).toFixed(2);
