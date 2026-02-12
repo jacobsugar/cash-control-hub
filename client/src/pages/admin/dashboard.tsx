@@ -207,7 +207,7 @@ export default function AdminDashboard() {
                       </p>
                     </div>
                     <p className="text-lg font-bold whitespace-nowrap">
-                      ${parseFloat(pos.currentBalance).toFixed(2)}
+                      ${parseFloat(pos.expectedCash || pos.currentBalance).toFixed(2)}
                     </p>
                   </div>
                 ))}

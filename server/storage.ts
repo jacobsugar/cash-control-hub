@@ -488,13 +488,25 @@ export class DatabaseStorage implements IStorage {
 
     const containerOpts = await this.getContainerOptions();
 
+    const cashPositions = await Promise.all(
+      containerOpts.map(async (c) => {
+        const last = await this.getLastShiftCountForContainer(c.id);
+        const baseAmount = last?.countedAmount || c.currentBalance || "0.00";
+        const sinceDate = last?.createdAt ? new Date(last.createdAt) : undefined;
+        const boulevardCash = await this.getBoulevardCashForContainer(c.id, sinceDate);
+        const receiptSpent = await this.getReceiptsTotalForContainer(c.id, sinceDate);
+        const expectedCash = (parseFloat(baseAmount) + boulevardCash - receiptSpent).toFixed(2);
+        return { ...c, expectedCash };
+      })
+    );
+
     return {
       openVariances: varianceAlerts.length,
       missingEndShifts: missingEndAlerts.length,
       receiptsToday: receiptsToday.length,
       totalContainers: containerOpts.length,
       recentAlerts: allAlerts.slice(0, 10),
-      cashPositions: containerOpts,
+      cashPositions,
     };
   }
 }
