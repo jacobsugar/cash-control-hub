@@ -500,13 +500,17 @@ export class DatabaseStorage implements IStorage {
       await db.insert(boulevardCatalog).values(data);
       return { action: "created" };
     }
+    const normalizePrice = (v: string | null | undefined) => v != null ? parseFloat(v).toFixed(2) : null;
     const changes: Record<string, any> = {};
-    if (data.category !== undefined && data.category !== existing.category) changes.category = data.category;
-    if (data.price !== undefined && data.price !== existing.price) changes.price = data.price;
-    if (data.duration !== undefined && data.duration !== existing.duration) changes.duration = data.duration;
-    if (data.description !== undefined && data.description !== existing.description) changes.description = data.description;
-    if (data.sku !== undefined && data.sku !== existing.sku) changes.sku = data.sku;
-    if (data.itemType !== undefined && data.itemType !== existing.itemType) changes.itemType = data.itemType;
+    if (data.category != null ? data.category !== existing.category : false) changes.category = data.category;
+    if (normalizePrice(data.price) !== normalizePrice(existing.price)) {
+      if (data.price != null) changes.price = data.price;
+      else if (existing.price != null) changes.price = null;
+    }
+    if (data.duration != null ? data.duration !== existing.duration : false) changes.duration = data.duration;
+    if (data.description != null ? data.description !== existing.description : false) changes.description = data.description;
+    if (data.sku != null ? data.sku !== existing.sku : false) changes.sku = data.sku;
+    if (data.itemType != null ? data.itemType !== existing.itemType : false) changes.itemType = data.itemType;
     if (Object.keys(changes).length === 0) return { action: "unchanged" };
     changes.updatedAt = new Date();
     await db.update(boulevardCatalog).set(changes).where(eq(boulevardCatalog.id, existing.id));

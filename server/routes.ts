@@ -794,23 +794,32 @@ export async function registerRoutes(
       let unchanged = 0;
       let skipped = 0;
 
+      const headers = records.length > 0 ? Object.keys(records[0]) : [];
+      const findCol = (record: any, ...candidates: string[]) => {
+        for (const candidate of candidates) {
+          const key = headers.find((h) => h.toLowerCase().trim() === candidate.toLowerCase().trim());
+          if (key && record[key] !== undefined && record[key] !== "") return record[key];
+        }
+        return "";
+      };
+
       for (const record of records) {
-        const name = record["Product / Service / Package"] || record["Name"] || record["Service"] || record["Product"] || record["name"] || "";
+        const name = findCol(record, "Product / Service / Package", "Name", "Service", "Product", "Item Name", "Service Name", "Product Name");
         if (!name.trim()) { skipped++; continue; }
 
-        const priceStr = record["Price"] || record["price"] || record["Retail Price"] || record["retail_price"] || "";
+        const priceStr = findCol(record, "Price", "Retail Price", "Unit Price", "Service Price", "Amount", "Cost");
         const price = priceStr ? parseFloat(priceStr.replace(/[^0-9.-]/g, "")) : null;
 
-        const durationStr = record["Duration"] || record["duration"] || record["Duration (min)"] || "";
+        const durationStr = findCol(record, "Duration", "Duration (min)", "Duration (minutes)", "Service Duration", "Time");
         const duration = durationStr ? parseInt(durationStr.replace(/[^0-9]/g, ""), 10) : null;
 
         const hasPrice = priceStr !== "" && price !== null && !isNaN(price);
         const hasDuration = durationStr !== "" && duration !== null && !isNaN(duration);
 
-        const category = record["Category"] || record["category"] || record["Service Category"] || null;
-        const description = record["Description"] || record["description"] || null;
-        const sku = record["SKU"] || record["sku"] || record["Item ID"] || record["ID"] || null;
-        const itemType = record["Type"] || record["type"] || record["Item Type"] || null;
+        const category = findCol(record, "Category", "Service Category", "Product Category", "Group") || null;
+        const description = findCol(record, "Description", "Notes", "Details") || null;
+        const sku = findCol(record, "SKU", "Item ID", "ID", "Product ID", "Service ID") || null;
+        const itemType = findCol(record, "Type", "Item Type", "Product Type", "Service Type") || null;
 
         const result = await storage.upsertBoulevardCatalogItem({
           name: name.trim(),
@@ -828,7 +837,7 @@ export async function registerRoutes(
       }
 
       fs.unlinkSync(req.file.path);
-      res.json({ created, updated, unchanged, skipped, total: records.length });
+      res.json({ created, updated, unchanged, skipped, total: records.length, columns: headers });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

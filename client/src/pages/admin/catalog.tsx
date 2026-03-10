@@ -53,6 +53,7 @@ export default function CatalogPage() {
       let desc = `${result.created} new, ${result.updated} updated, ${result.unchanged} unchanged`;
       if (result.skipped > 0) desc += `, ${result.skipped} skipped (no name)`;
       desc += ` out of ${result.total} rows.`;
+      if (result.columns?.length) desc += ` Columns detected: ${result.columns.join(", ")}.`;
       toast({ title: "Catalog import complete", description: desc });
     } catch (err: any) {
       toast({ title: "Import failed", description: err.message, variant: "destructive" });
