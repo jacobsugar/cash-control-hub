@@ -768,6 +768,81 @@ export async function registerRoutes(
     }
   });
 
+  // Boulevard Catalog
+  app.get("/api/admin/boulevard-catalog", requireAdmin, async (_req, res) => {
+    try {
+      const data = await storage.getBoulevardCatalog();
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/boulevard-catalog/import", requireAdmin, upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).send("No file uploaded");
+
+      const fileContent = fs.readFileSync(req.file.path, "utf-8");
+      const records = parse(fileContent, {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+      });
+
+      let created = 0;
+      let updated = 0;
+      let unchanged = 0;
+      let skipped = 0;
+
+      for (const record of records) {
+        const name = record["Product / Service / Package"] || record["Name"] || record["Service"] || record["Product"] || record["name"] || "";
+        if (!name.trim()) { skipped++; continue; }
+
+        const priceStr = record["Price"] || record["price"] || record["Retail Price"] || record["retail_price"] || "";
+        const price = priceStr ? parseFloat(priceStr.replace(/[^0-9.-]/g, "")) : null;
+
+        const durationStr = record["Duration"] || record["duration"] || record["Duration (min)"] || "";
+        const duration = durationStr ? parseInt(durationStr.replace(/[^0-9]/g, ""), 10) : null;
+
+        const hasPrice = priceStr !== "" && price !== null && !isNaN(price);
+        const hasDuration = durationStr !== "" && duration !== null && !isNaN(duration);
+
+        const category = record["Category"] || record["category"] || record["Service Category"] || null;
+        const description = record["Description"] || record["description"] || null;
+        const sku = record["SKU"] || record["sku"] || record["Item ID"] || record["ID"] || null;
+        const itemType = record["Type"] || record["type"] || record["Item Type"] || null;
+
+        const result = await storage.upsertBoulevardCatalogItem({
+          name: name.trim(),
+          category: category?.trim() || null,
+          price: hasPrice ? price!.toFixed(2) : null,
+          duration: hasDuration ? duration! : null,
+          description: description?.trim() || null,
+          sku: sku?.trim() || null,
+          itemType: itemType?.trim() || null,
+        });
+
+        if (result.action === "created") created++;
+        else if (result.action === "updated") updated++;
+        else unchanged++;
+      }
+
+      fs.unlinkSync(req.file.path);
+      res.json({ created, updated, unchanged, skipped, total: records.length });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/boulevard-catalog/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteBoulevardCatalogItem(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // Admin Users
   app.get("/api/admin/users", requireAdmin, async (_req, res) => {
     try {

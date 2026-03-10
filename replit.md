@@ -33,6 +33,7 @@ CashControl by Hello Sugar is a web tool for Hello Sugar salons to track and rec
 - `/admin/alerts` - Alert management
 - `/admin/collections` - Cash collection events
 - `/admin/boulevard` - Boulevard CSV import and data view
+- `/admin/catalog` - Boulevard catalog (services/products/packages) import and management
 - `/admin/markets` - Market management
 - `/admin/locations` - Location and container management
 - `/admin/estheticians` - Staff list management
@@ -55,6 +56,7 @@ CashControl by Hello Sugar is a web tool for Hello Sugar salons to track and rec
 - **ShiftCounts** - Start/end of shift cash count submissions
 - **Receipts** - Uploaded receipt files with amounts
 - **BoulevardTransactions** - Imported cash transactions from Boulevard
+- **BoulevardCatalog** - Services, products, and packages from Boulevard with pricing
 - **Alerts** - System-generated alerts for discrepancies
 - **CashCollections** - Periodic physical cash collection events
 - **AdminUsers** - Allowlisted admin email addresses
