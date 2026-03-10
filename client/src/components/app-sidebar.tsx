@@ -12,7 +12,6 @@ import {
   Wallet,
   Shield,
   Settings,
-  BookOpen,
 } from "lucide-react";
 import {
   Sidebar,
@@ -39,7 +38,6 @@ const mainItems = [
 
 const dataItems = [
   { title: "Boulevard Import", url: "/admin/boulevard", icon: FileSpreadsheet },
-  { title: "Boulevard Catalog", url: "/admin/catalog", icon: BookOpen },
 ];
 
 const settingsItems = [

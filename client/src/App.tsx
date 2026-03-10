@@ -15,7 +15,6 @@ import ReceiptsPage from "@/pages/admin/receipts";
 import AlertsPage from "@/pages/admin/alerts";
 import CollectionsPage from "@/pages/admin/collections";
 import BoulevardPage from "@/pages/admin/boulevard";
-import CatalogPage from "@/pages/admin/catalog";
 import MarketsPage from "@/pages/admin/markets";
 import LocationsPage from "@/pages/admin/locations";
 import EstheticiansPage from "@/pages/admin/estheticians";
@@ -50,7 +49,6 @@ function AdminRouter() {
         <Route path="/admin/alerts" component={AlertsPage} />
         <Route path="/admin/collections" component={CollectionsPage} />
         <Route path="/admin/boulevard" component={BoulevardPage} />
-        <Route path="/admin/catalog" component={CatalogPage} />
         <Route path="/admin/markets" component={MarketsPage} />
         <Route path="/admin/locations" component={LocationsPage} />
         <Route path="/admin/estheticians" component={EstheticiansPage} />

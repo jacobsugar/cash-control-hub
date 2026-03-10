@@ -3,14 +3,13 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import {
   markets, locations, containers, estheticians, shiftCounts, receipts,
-  boulevardTransactions, boulevardCatalog, alerts, cashCollections, adminUsers, alertRecipients, appSettings,
+  boulevardTransactions, alerts, cashCollections, adminUsers, alertRecipients, appSettings,
   type InsertMarket, type InsertLocation, type InsertContainer, type InsertEsthetician,
   type InsertShiftCount, type InsertReceipt, type InsertBoulevardTransaction,
-  type InsertBoulevardCatalogItem,
   type InsertAlert, type InsertCashCollection, type InsertAdminUser,
   type InsertAlertRecipient, type InsertAppSetting,
   type Market, type Location, type Container, type Esthetician, type ShiftCount,
-  type Receipt, type BoulevardTransaction, type BoulevardCatalogItem, type Alert, type CashCollection,
+  type Receipt, type BoulevardTransaction, type Alert, type CashCollection,
   type AdminUser, type AlertRecipient, type AppSetting,
 } from "@shared/schema";
 
@@ -81,11 +80,6 @@ export interface IStorage {
   createAlertRecipient(data: InsertAlertRecipient): Promise<AlertRecipient>;
   updateAlertRecipient(id: number, data: Partial<InsertAlertRecipient>): Promise<void>;
   deleteAlertRecipient(id: number): Promise<void>;
-
-  // Boulevard Catalog
-  getBoulevardCatalog(): Promise<BoulevardCatalogItem[]>;
-  upsertBoulevardCatalogItem(data: InsertBoulevardCatalogItem): Promise<{ action: "created" | "updated" | "unchanged" }>;
-  deleteBoulevardCatalogItem(id: number): Promise<void>;
 
   // App Settings
   getSettings(): Promise<AppSetting[]>;
@@ -487,38 +481,6 @@ export class DatabaseStorage implements IStorage {
     } else {
       await db.insert(appSettings).values({ key, value });
     }
-  }
-
-  // Boulevard Catalog
-  async getBoulevardCatalog() {
-    return db.select().from(boulevardCatalog).orderBy(boulevardCatalog.category, boulevardCatalog.name);
-  }
-
-  async upsertBoulevardCatalogItem(data: InsertBoulevardCatalogItem): Promise<{ action: "created" | "updated" | "unchanged" }> {
-    const [existing] = await db.select().from(boulevardCatalog).where(sql`LOWER(${boulevardCatalog.name}) = LOWER(${data.name})`);
-    if (!existing) {
-      await db.insert(boulevardCatalog).values(data);
-      return { action: "created" };
-    }
-    const normalizePrice = (v: string | null | undefined) => v != null ? parseFloat(v).toFixed(2) : null;
-    const changes: Record<string, any> = {};
-    if (data.category != null ? data.category !== existing.category : false) changes.category = data.category;
-    if (normalizePrice(data.price) !== normalizePrice(existing.price)) {
-      if (data.price != null) changes.price = data.price;
-      else if (existing.price != null) changes.price = null;
-    }
-    if (data.duration != null ? data.duration !== existing.duration : false) changes.duration = data.duration;
-    if (data.description != null ? data.description !== existing.description : false) changes.description = data.description;
-    if (data.sku != null ? data.sku !== existing.sku : false) changes.sku = data.sku;
-    if (data.itemType != null ? data.itemType !== existing.itemType : false) changes.itemType = data.itemType;
-    if (Object.keys(changes).length === 0) return { action: "unchanged" };
-    changes.updatedAt = new Date();
-    await db.update(boulevardCatalog).set(changes).where(eq(boulevardCatalog.id, existing.id));
-    return { action: "updated" };
-  }
-
-  async deleteBoulevardCatalogItem(id: number) {
-    await db.delete(boulevardCatalog).where(eq(boulevardCatalog.id, id));
   }
 
   // Dashboard

@@ -124,19 +124,6 @@ export const alertRecipients = pgTable("alert_recipients", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const boulevardCatalog = pgTable("boulevard_catalog", {
-  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  name: text("name").notNull(),
-  category: text("category"),
-  price: decimal("price", { precision: 10, scale: 2 }),
-  duration: integer("duration"),
-  description: text("description"),
-  sku: text("sku"),
-  itemType: text("item_type"),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  importedAt: timestamp("imported_at").defaultNow().notNull(),
-});
-
 export const appSettings = pgTable("app_settings", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   key: text("key").notNull().unique(),
@@ -155,7 +142,6 @@ export const insertAlertSchema = createInsertSchema(alerts).omit({ id: true, cre
 export const insertCashCollectionSchema = createInsertSchema(cashCollections).omit({ id: true, createdAt: true });
 export const insertAdminUserSchema = createInsertSchema(adminUsers).omit({ id: true, createdAt: true });
 export const insertAlertRecipientSchema = createInsertSchema(alertRecipients).omit({ id: true, createdAt: true });
-export const insertBoulevardCatalogSchema = createInsertSchema(boulevardCatalog).omit({ id: true, updatedAt: true, importedAt: true });
 export const insertAppSettingSchema = createInsertSchema(appSettings).omit({ id: true });
 
 // Insert types
@@ -170,7 +156,6 @@ export type InsertAlert = z.infer<typeof insertAlertSchema>;
 export type InsertCashCollection = z.infer<typeof insertCashCollectionSchema>;
 export type InsertAdminUser = z.infer<typeof insertAdminUserSchema>;
 export type InsertAlertRecipient = z.infer<typeof insertAlertRecipientSchema>;
-export type InsertBoulevardCatalogItem = z.infer<typeof insertBoulevardCatalogSchema>;
 export type InsertAppSetting = z.infer<typeof insertAppSettingSchema>;
 
 // Select types
@@ -185,5 +170,4 @@ export type Alert = typeof alerts.$inferSelect;
 export type CashCollection = typeof cashCollections.$inferSelect;
 export type AdminUser = typeof adminUsers.$inferSelect;
 export type AlertRecipient = typeof alertRecipients.$inferSelect;
-export type BoulevardCatalogItem = typeof boulevardCatalog.$inferSelect;
 export type AppSetting = typeof appSettings.$inferSelect;
