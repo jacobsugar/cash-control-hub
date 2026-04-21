@@ -7,6 +7,19 @@ import fs from "fs";
 import { parse } from "csv-parse/sync";
 import session from "express-session";
 import OpenAI from "openai";
+import * as boulevard from "./boulevard";
+
+// Singleton OpenAI client — reused across requests
+let openaiClient: OpenAI | null = null;
+function getOpenAIClient(): OpenAI {
+  if (!openaiClient) {
+    openaiClient = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+  }
+  return openaiClient;
+}
 
 function formatPhoneE164(phone: string): string {
   const digits = phone.replace(/\D/g, "");
@@ -42,6 +55,10 @@ function buildAlertMessage(alertData: {
   }
 }
 
+// Cache for OpenPhone userId resolution (rarely changes)
+let cachedUserId: { value: string | undefined; expiresAt: number } | null = null;
+const USER_ID_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
 async function sendAlertSms(alertData: {
   type: string;
   staffName?: string | null;
@@ -52,16 +69,17 @@ async function sendAlertSms(alertData: {
   note?: string | null;
 }) {
   try {
-    const settings = await storage.getSettings();
-    const apiKeySetting = settings.find((s) => s.key === "quo_api_key");
-    const fromNumberSetting = settings.find((s) => s.key === "quo_from_number");
+    const [apiKey, fromNumberRaw, recipients] = await Promise.all([
+      storage.getSetting("quo_api_key"),
+      storage.getSetting("quo_from_number"),
+      storage.getAlertRecipients(),
+    ]);
 
-    if (!apiKeySetting?.value || !fromNumberSetting?.value) {
+    if (!apiKey || !fromNumberRaw) {
       console.log("SMS not sent: Quo API key or from number not configured");
       return;
     }
 
-    const recipients = await storage.getAlertRecipients();
     const activeRecipients = recipients.filter((r) => r.active);
     if (activeRecipients.length === 0) {
       console.log("SMS not sent: No active alert recipients");
@@ -69,23 +87,29 @@ async function sendAlertSms(alertData: {
     }
 
     const message = buildAlertMessage(alertData);
-    const fromNumber = formatPhoneE164(fromNumberSetting.value);
+    const fromNumber = formatPhoneE164(fromNumberRaw);
 
-    const phoneNumbersRes = await fetch("https://api.openphone.com/v1/phone-numbers", {
-      headers: { Authorization: apiKeySetting.value },
-    });
-
+    // Resolve userId with caching
     let userId: string | undefined;
-    if (phoneNumbersRes.ok) {
-      const phoneData = await phoneNumbersRes.json();
-      const matchingNumber = phoneData.data?.find((pn: any) => {
-        const formatted = formatPhoneE164(pn.formattedNumber || pn.phoneNumber || "");
-        return formatted === fromNumber;
+    if (cachedUserId && Date.now() < cachedUserId.expiresAt) {
+      userId = cachedUserId.value;
+    } else {
+      const phoneNumbersRes = await fetch("https://api.openphone.com/v1/phone-numbers", {
+        headers: { Authorization: apiKey },
       });
-      userId = matchingNumber?.users?.[0]?.id;
+      if (phoneNumbersRes.ok) {
+        const phoneData = await phoneNumbersRes.json();
+        const matchingNumber = phoneData.data?.find((pn: any) => {
+          const formatted = formatPhoneE164(pn.formattedNumber || pn.phoneNumber || "");
+          return formatted === fromNumber;
+        });
+        userId = matchingNumber?.users?.[0]?.id;
+      }
+      cachedUserId = { value: userId, expiresAt: Date.now() + USER_ID_CACHE_TTL_MS };
     }
 
-    for (const recipient of activeRecipients) {
+    // Send to all recipients in parallel
+    const sendPromises = activeRecipients.map(async (recipient) => {
       const toNumber = formatPhoneE164(recipient.phoneNumber);
       const body: any = {
         content: message,
@@ -97,7 +121,7 @@ async function sendAlertSms(alertData: {
       const sendRes = await fetch("https://api.openphone.com/v1/messages", {
         method: "POST",
         headers: {
-          Authorization: apiKeySetting.value,
+          Authorization: apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
@@ -109,7 +133,9 @@ async function sendAlertSms(alertData: {
         const errText = await sendRes.text();
         console.error(`SMS failed for ${recipient.name} (${toNumber}): ${sendRes.status} ${errText}`);
       }
-    }
+    });
+
+    await Promise.allSettled(sendPromises);
   } catch (err) {
     console.error("SMS sending error:", err);
   }
@@ -145,6 +171,60 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   res.status(401).json({ message: "Unauthorized" });
 }
 
+async function syncBoulevardLocation(blvdLocationId: string, appLocationId: number, sinceDays: number) {
+  const since = new Date();
+  since.setDate(since.getDate() - sinceDays);
+
+  const cashOrders = await boulevard.fetchCashOrdersForLocation(blvdLocationId, since);
+
+  // Check which orders we've already imported (by orderId)
+  const existingTransactions = await storage.getBoulevardTransactions();
+  const existingOrderIds = new Set(existingTransactions.map((t: any) => t.orderId).filter(Boolean));
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (const order of cashOrders) {
+    if (existingOrderIds.has(order.orderId)) {
+      skipped++;
+      continue;
+    }
+
+    await storage.createBoulevardTransaction({
+      date: new Date(order.closedAt),
+      locationId: appLocationId,
+      orderId: order.orderId,
+      amount: order.cashAmount.toFixed(2),
+      operatorName: order.operatorName,
+      clientName: order.clientName,
+      paymentMethod: "cash",
+    });
+    imported++;
+  }
+
+  return { imported, skipped, total: cashOrders.length };
+}
+
+async function syncAllBoulevardLocations() {
+  const mappedLocations = await storage.getBoulevardMappedLocations();
+  const results: { locationName: string; imported: number; skipped: number; error?: string }[] = [];
+  let totalImported = 0;
+
+  for (const loc of mappedLocations) {
+    try {
+      // Sync last 2 days for auto-sync (enough overlap to catch anything missed)
+      const result = await syncBoulevardLocation(loc.boulevardLocationId!, loc.id, 2);
+      results.push({ locationName: loc.name, imported: result.imported, skipped: result.skipped });
+      totalImported += result.imported;
+    } catch (err: any) {
+      console.error(`Boulevard sync failed for ${loc.name}:`, err.message);
+      results.push({ locationName: loc.name, imported: 0, skipped: 0, error: err.message });
+    }
+  }
+
+  return { totalImported, locations: results };
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -160,6 +240,16 @@ export async function registerRoutes(
 
   // OCR rate limiting: max 10 requests per IP per minute
   const ocrRateMap = new Map<string, number[]>();
+  // Periodically clean up stale rate-limit entries to prevent memory leak
+  setInterval(() => {
+    const now = Date.now();
+    ocrRateMap.forEach((timestamps, ip) => {
+      if (timestamps.length === 0 || now - timestamps[timestamps.length - 1] > 60000) {
+        ocrRateMap.delete(ip);
+      }
+    });
+  }, 5 * 60 * 1000); // every 5 minutes
+
   app.post("/api/ocr/receipt", upload.single("file"), async (req, res) => {
     const ip = req.ip || "unknown";
     const now = Date.now();
@@ -189,10 +279,7 @@ export async function registerRoutes(
 
       fs.unlinkSync(filePath);
 
-      const openai = new OpenAI({
-        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-        baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-      });
+      const openai = getOpenAIClient();
 
       const response = await openai.chat.completions.create({
         model: "gpt-4o-mini",
@@ -344,7 +431,7 @@ export async function registerRoutes(
         sinceDate = last?.createdAt ? new Date(last.createdAt) : undefined;
       }
 
-      const boulevardCash = await storage.getBoulevardCashForContainer(containerId, sinceDate);
+      const boulevardCash = await storage.getBoulevardCashForLocation(container.locationId, sinceDate);
       const receiptSpent = await storage.getReceiptsTotalForContainer(containerId, sinceDate);
 
       const expectedAmount = (
@@ -376,11 +463,11 @@ export async function registerRoutes(
 
       // Check for mismatch and create alert (only for start-of-shift counts)
       if (type === "start" && expectedAmount && parseFloat(countedAmount) !== parseFloat(expectedAmount)) {
-        const container = await storage.getContainer(containerId);
-        const locationsWithMarket = await storage.getLocationsWithMarket();
-        const loc = locationsWithMarket.find((l) => l.id === container?.locationId);
-        const estheticianList = await storage.getEstheticians();
-        const esth = estheticianList.find((e) => e.id === estheticianId);
+        const [container, esth] = await Promise.all([
+          storage.getContainer(containerId),
+          storage.getEsthetician(estheticianId),
+        ]);
+        const loc = container ? await storage.getLocation(container.locationId) : undefined;
 
         await storage.createAlert({
           type: "start_mismatch",
@@ -429,11 +516,11 @@ export async function registerRoutes(
       });
 
       // Create alert for receipt submission
-      const container = await storage.getContainer(parseInt(containerId));
-      const locationsWithMarket = await storage.getLocationsWithMarket();
-      const loc = locationsWithMarket.find((l) => l.id === container?.locationId);
-      const estheticianList = await storage.getEstheticians();
-      const esth = estheticianList.find((e) => e.id === parseInt(estheticianId));
+      const [container, esth] = await Promise.all([
+        storage.getContainer(parseInt(containerId)),
+        storage.getEsthetician(parseInt(estheticianId)),
+      ]);
+      const loc = container ? await storage.getLocation(container.locationId) : undefined;
 
       await storage.createAlert({
         type: "receipt_submitted",
@@ -646,8 +733,7 @@ export async function registerRoutes(
       // Create alert if mismatch
       if (parseFloat(expectedAmount) !== parseFloat(collectedAmount)) {
         const container = await storage.getContainer(containerId);
-        const locationsWithMarket = await storage.getLocationsWithMarket();
-        const loc = locationsWithMarket.find((l) => l.id === container?.locationId);
+        const loc = container ? await storage.getLocation(container.locationId) : undefined;
 
         await storage.createAlert({
           type: "collection_mismatch",
@@ -768,6 +854,78 @@ export async function registerRoutes(
     }
   });
 
+  // Boulevard API integration
+  app.get("/api/admin/boulevard/status", requireAdmin, async (_req, res) => {
+    try {
+      if (!boulevard.isConfigured()) {
+        return res.json({ configured: false, message: "Boulevard API credentials not set" });
+      }
+      const result = await boulevard.testConnection();
+      res.json({ configured: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/boulevard/locations", requireAdmin, async (_req, res) => {
+    try {
+      if (!boulevard.isConfigured()) {
+        return res.status(400).json({ message: "Boulevard API not configured" });
+      }
+      const locations = await boulevard.fetchLocations();
+      res.json(locations);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Manual sync for a single location
+  app.post("/api/admin/boulevard/sync", requireAdmin, async (req, res) => {
+    try {
+      if (!boulevard.isConfigured()) {
+        return res.status(400).json({ message: "Boulevard API not configured" });
+      }
+
+      const { blvdLocationId, locationId, sinceDays } = req.body;
+      if (!blvdLocationId || !locationId) {
+        return res.status(400).json({ message: "blvdLocationId and locationId are required" });
+      }
+
+      const result = await syncBoulevardLocation(blvdLocationId, locationId, sinceDays || 7);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Manual trigger to sync all mapped locations
+  app.post("/api/admin/boulevard/sync-all", requireAdmin, async (_req, res) => {
+    try {
+      if (!boulevard.isConfigured()) {
+        return res.status(400).json({ message: "Boulevard API not configured" });
+      }
+      const result = await syncAllBoulevardLocations();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Auto-sync Boulevard every 10 minutes
+  if (boulevard.isConfigured()) {
+    setInterval(async () => {
+      try {
+        const result = await syncAllBoulevardLocations();
+        if (result.totalImported > 0) {
+          console.log(`Boulevard auto-sync: imported ${result.totalImported} new transactions across ${result.locations.length} locations`);
+        }
+      } catch (err) {
+        console.error("Boulevard auto-sync error:", err);
+      }
+    }, 10 * 60 * 1000); // 10 minutes
+    console.log("Boulevard auto-sync scheduled every 10 minutes");
+  }
+
   // Admin Users
   app.get("/api/admin/users", requireAdmin, async (_req, res) => {
     try {
@@ -856,35 +1014,15 @@ export async function registerRoutes(
 }
 
 async function checkMissingEndShifts() {
-  const shifts = await storage.getShiftCounts();
-  const now = new Date();
   const maxShiftHours = 12;
+  const cutoff = new Date(Date.now() - maxShiftHours * 60 * 60 * 1000);
 
-  const startShifts = shifts.filter((s) => s.type === "start");
+  // Single efficient query: get open start shifts older than cutoff
+  const openShifts = await storage.getOpenStartShifts(cutoff);
 
-  for (const startShift of startShifts) {
-    const startTime = new Date(startShift.createdAt!);
-    const hoursSinceStart = (now.getTime() - startTime.getTime()) / (1000 * 60 * 60);
-
-    if (hoursSinceStart < maxShiftHours) continue;
-
-    const hasEndShift = shifts.some(
-      (s) =>
-        s.type === "end" &&
-        s.containerId === startShift.containerId &&
-        s.estheticianId === startShift.estheticianId &&
-        new Date(s.createdAt!) > startTime
-    );
-
-    if (hasEndShift) continue;
-
-    const existingAlerts = await storage.getAlerts();
-    const alreadyAlerted = existingAlerts.some(
-      (a) =>
-        a.type === "missing_end_shift" &&
-        a.shiftCountId === startShift.id
-    );
-
+  for (const startShift of openShifts) {
+    // Check if alert already exists for this shift (single targeted query)
+    const alreadyAlerted = await storage.hasAlertForShiftCount(startShift.id, "missing_end_shift");
     if (alreadyAlerted) continue;
 
     await storage.createAlert({

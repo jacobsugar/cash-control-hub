@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -66,7 +66,7 @@ export default function BoulevardPage() {
     }
   };
 
-  const filtered = transactions?.filter((t) => {
+  const filtered = useMemo(() => transactions?.filter((t) => {
     if (search) {
       const q = search.toLowerCase();
       if (!(t.operatorName || "").toLowerCase().includes(q) &&
@@ -77,7 +77,7 @@ export default function BoulevardPage() {
     }
     if (locationFilter !== "all" && String(t.locationId) !== locationFilter) return false;
     return true;
-  }) || [];
+  }) || [], [transactions, search, locationFilter]);
 
   return (
     <div className="space-y-6">

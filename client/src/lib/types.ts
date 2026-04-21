@@ -16,6 +16,7 @@ export interface ContainerWithLocation {
   marketName: string;
   locationType: "suite" | "flagship";
   currentBalance: string;
+  expectedCash?: string;
 }
 
 export interface ShiftCountWithDetails {

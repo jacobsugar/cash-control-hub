@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Calculator, Search, Download, AlertTriangle, CheckCircle2 } from "lucide-react";
 import type { ShiftCountWithDetails } from "@/lib/types";
 import type { Market } from "@shared/schema";
@@ -24,14 +24,14 @@ export default function ShiftsPage() {
     queryKey: ["/api/markets"],
   });
 
-  const filtered = shifts?.filter((s) => {
+  const filtered = useMemo(() => shifts?.filter((s) => {
     if (search && !s.estheticianName.toLowerCase().includes(search.toLowerCase()) &&
         !s.locationName.toLowerCase().includes(search.toLowerCase()) &&
         !s.containerName.toLowerCase().includes(search.toLowerCase())) return false;
     if (marketFilter !== "all" && s.marketName !== marketFilter) return false;
     if (typeFilter !== "all" && s.type !== typeFilter) return false;
     return true;
-  }) || [];
+  }) || [], [shifts, search, marketFilter, typeFilter]);
 
   const handleExport = () => {
     const csvContent = [

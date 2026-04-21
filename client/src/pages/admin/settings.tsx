@@ -88,8 +88,10 @@ export default function SettingsPage() {
             </div>
             <Button
               onClick={async () => {
-                await saveMutation.mutateAsync({ key: "quo_api_key", value: quoApiKey });
-                await saveMutation.mutateAsync({ key: "quo_from_number", value: quoFromNumber });
+                await Promise.all([
+                  saveMutation.mutateAsync({ key: "quo_api_key", value: quoApiKey }),
+                  saveMutation.mutateAsync({ key: "quo_from_number", value: quoFromNumber }),
+                ]);
               }}
               disabled={saveMutation.isPending}
               data-testid="button-save-settings"

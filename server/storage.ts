@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, sql, inArray } from "drizzle-orm";
+import { eq, desc, and, gte, sql, inArray, ne, notInArray, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import {
@@ -24,6 +24,7 @@ export interface IStorage {
 
   // Locations
   getLocations(): Promise<Location[]>;
+  getLocation(id: number): Promise<(Location & { marketName: string }) | undefined>;
   getLocationsWithMarket(): Promise<(Location & { marketName: string })[]>;
   getLocationsWithContainers(): Promise<(Location & { marketName: string; containers: Container[] })[]>;
   createLocation(data: InsertLocation): Promise<Location>;
@@ -39,6 +40,7 @@ export interface IStorage {
 
   // Estheticians
   getEstheticians(): Promise<Esthetician[]>;
+  getEsthetician(id: number): Promise<Esthetician | undefined>;
   createEsthetician(data: InsertEsthetician): Promise<Esthetician>;
   updateEsthetician(id: number, data: Partial<InsertEsthetician>): Promise<void>;
   deleteEsthetician(id: number): Promise<void>;
@@ -57,12 +59,14 @@ export interface IStorage {
   // Boulevard Transactions
   getBoulevardTransactions(): Promise<any[]>;
   createBoulevardTransaction(data: InsertBoulevardTransaction): Promise<BoulevardTransaction>;
-  getBoulevardCashForContainer(containerId: number, since?: Date): Promise<number>;
+  getBoulevardCashForLocation(locationId: number, since?: Date): Promise<number>;
 
   // Alerts
   getAlerts(): Promise<Alert[]>;
+  getActiveAlertCounts(): Promise<{ variances: number; missingEndShifts: number }>;
   createAlert(data: InsertAlert): Promise<Alert>;
   updateAlertStatus(id: number, status: string): Promise<void>;
+  hasAlertForShiftCount(shiftCountId: number, type: string): Promise<boolean>;
 
   // Cash Collections
   getCollections(): Promise<any[]>;
@@ -88,6 +92,10 @@ export interface IStorage {
 
   // Dashboard
   getDashboardStats(): Promise<any>;
+
+  // Efficient queries for missing shift checks
+  getOpenStartShifts(olderThan: Date): Promise<any[]>;
+  getReceiptsCountSince(since: Date): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -112,6 +120,37 @@ export class DatabaseStorage implements IStorage {
   // Locations
   async getLocations() {
     return db.select().from(locations).orderBy(locations.name);
+  }
+
+  async getLocation(id: number) {
+    const [result] = await db
+      .select({
+        id: locations.id,
+        name: locations.name,
+        marketId: locations.marketId,
+        type: locations.type,
+        timezone: locations.timezone,
+        dailyFloat: locations.dailyFloat,
+        boulevardLocationId: locations.boulevardLocationId,
+        createdAt: locations.createdAt,
+        marketName: markets.name,
+      })
+      .from(locations)
+      .innerJoin(markets, eq(locations.marketId, markets.id))
+      .where(eq(locations.id, id));
+    return result as (Location & { marketName: string }) | undefined;
+  }
+
+  async getBoulevardMappedLocations() {
+    const result = await db
+      .select({
+        id: locations.id,
+        name: locations.name,
+        boulevardLocationId: locations.boulevardLocationId,
+      })
+      .from(locations)
+      .where(sql`${locations.boulevardLocationId} IS NOT NULL`);
+    return result;
   }
 
   async getLocationsWithMarket() {
@@ -219,6 +258,11 @@ export class DatabaseStorage implements IStorage {
   // Estheticians
   async getEstheticians() {
     return db.select().from(estheticians).orderBy(estheticians.name);
+  }
+
+  async getEsthetician(id: number) {
+    const [esth] = await db.select().from(estheticians).where(eq(estheticians.id, id));
+    return esth;
   }
 
   async createEsthetician(data: InsertEsthetician) {
@@ -363,10 +407,8 @@ export class DatabaseStorage implements IStorage {
     return tx;
   }
 
-  async getBoulevardCashForContainer(containerId: number, since?: Date) {
-    const container = await this.getContainer(containerId);
-    if (!container) return 0;
-    const conditions = [eq(boulevardTransactions.locationId, container.locationId)];
+  async getBoulevardCashForLocation(locationId: number, since?: Date) {
+    const conditions = [eq(boulevardTransactions.locationId, locationId)];
     if (since) conditions.push(gte(boulevardTransactions.date, since));
     const result = await db
       .select({ total: sql<string>`COALESCE(SUM(${boulevardTransactions.amount}::numeric), 0)` })
@@ -378,6 +420,37 @@ export class DatabaseStorage implements IStorage {
   // Alerts
   async getAlerts() {
     return db.select().from(alerts).orderBy(desc(alerts.createdAt));
+  }
+
+  async getActiveAlertCounts() {
+    const result = await db
+      .select({
+        type: alerts.type,
+        count: sql<string>`COUNT(*)`,
+      })
+      .from(alerts)
+      .where(eq(alerts.status, "active"))
+      .groupBy(alerts.type);
+
+    let variances = 0;
+    let missingEndShifts = 0;
+    for (const row of result) {
+      const count = parseInt(row.count);
+      if (["start_mismatch", "end_mismatch", "collection_mismatch"].includes(row.type)) {
+        variances += count;
+      } else if (row.type === "missing_end_shift") {
+        missingEndShifts += count;
+      }
+    }
+    return { variances, missingEndShifts };
+  }
+
+  async hasAlertForShiftCount(shiftCountId: number, type: string) {
+    const [result] = await db
+      .select({ count: sql<string>`COUNT(*)` })
+      .from(alerts)
+      .where(and(eq(alerts.shiftCountId, shiftCountId), eq(alerts.type, type as any)));
+    return parseInt(result?.count || "0") > 0;
   }
 
   async createAlert(data: InsertAlert) {
@@ -475,50 +548,77 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertSetting(key: string, value: string) {
-    const existing = await this.getSetting(key);
-    if (existing !== null) {
-      await db.update(appSettings).set({ value }).where(eq(appSettings.key, key));
-    } else {
-      await db.insert(appSettings).values({ key, value });
-    }
+    await db
+      .insert(appSettings)
+      .values({ key, value })
+      .onConflictDoUpdate({ target: appSettings.key, set: { value } });
   }
 
   // Dashboard
   async getDashboardStats() {
-    const allAlerts = await this.getAlerts();
-    const activeAlerts = allAlerts.filter((a) => a.status === "active");
-    const varianceAlerts = activeAlerts.filter((a) =>
-      ["start_mismatch", "end_mismatch", "collection_mismatch"].includes(a.type)
-    );
-    const missingEndAlerts = activeAlerts.filter((a) => a.type === "missing_end_shift");
+    // Efficient: get alert counts with a single grouped query
+    const alertCounts = await this.getActiveAlertCounts();
 
+    // Efficient: count today's receipts directly in SQL
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const allReceipts = await this.getReceipts();
-    const receiptsToday = allReceipts.filter((r) => new Date(r.createdAt) >= today);
+    const receiptsTodayCount = await this.getReceiptsCountSince(today);
+
+    // Recent alerts (only fetch 10)
+    const recentAlerts = await db.select().from(alerts).orderBy(desc(alerts.createdAt)).limit(10);
 
     const containerOpts = await this.getContainerOptions();
 
+    // Batch fetch last shift counts and collections for all containers
+    const containerIds = containerOpts.map(c => c.id);
+
+    // Get last shift count per container using a single query with DISTINCT ON
+    const lastShifts = containerIds.length > 0 ? await db.execute(sql`
+      SELECT DISTINCT ON (container_id) *
+      FROM shift_counts
+      WHERE container_id = ANY(${containerIds})
+      ORDER BY container_id, created_at DESC
+    `) : [];
+
+    const lastCollections = containerIds.length > 0 ? await db.execute(sql`
+      SELECT DISTINCT ON (container_id) *
+      FROM cash_collections
+      WHERE container_id = ANY(${containerIds})
+      ORDER BY container_id, created_at DESC
+    `) : [];
+
+    // Index by container ID for O(1) lookups
+    const shiftsByContainer = new Map<number, any>();
+    for (const row of lastShifts as any[]) {
+      shiftsByContainer.set(row.container_id, row);
+    }
+    const collectionsByContainer = new Map<number, any>();
+    for (const row of lastCollections as any[]) {
+      collectionsByContainer.set(row.container_id, row);
+    }
+
+    // Calculate cash positions — still need per-container boulevard/receipt sums
+    // but avoid refetching container data
     const cashPositions = await Promise.all(
       containerOpts.map(async (c) => {
-        const lastShift = await this.getLastShiftCountForContainer(c.id);
-        const lastCollection = await this.getLastCollectionForContainer(c.id);
+        const lastShift = shiftsByContainer.get(c.id);
+        const lastCollection = collectionsByContainer.get(c.id);
 
-        const shiftTime = lastShift?.createdAt ? new Date(lastShift.createdAt).getTime() : 0;
-        const collectionTime = lastCollection?.createdAt ? new Date(lastCollection.createdAt).getTime() : 0;
+        const shiftTime = lastShift?.created_at ? new Date(lastShift.created_at).getTime() : 0;
+        const collectionTime = lastCollection?.created_at ? new Date(lastCollection.created_at).getTime() : 0;
 
         let baseAmount: string;
         let sinceDate: Date | undefined;
 
         if (collectionTime > shiftTime) {
           baseAmount = "0.00";
-          sinceDate = new Date(lastCollection!.createdAt);
+          sinceDate = new Date(lastCollection.created_at);
         } else {
-          baseAmount = lastShift?.countedAmount || c.currentBalance || "0.00";
-          sinceDate = lastShift?.createdAt ? new Date(lastShift.createdAt) : undefined;
+          baseAmount = lastShift?.counted_amount || c.currentBalance || "0.00";
+          sinceDate = lastShift?.created_at ? new Date(lastShift.created_at) : undefined;
         }
 
-        const boulevardCash = await this.getBoulevardCashForContainer(c.id, sinceDate);
+        const boulevardCash = await this.getBoulevardCashForLocation(c.locationId, sinceDate);
         const receiptSpent = await this.getReceiptsTotalForContainer(c.id, sinceDate);
         const expectedCash = (parseFloat(baseAmount) + boulevardCash - receiptSpent).toFixed(2);
         return { ...c, expectedCash };
@@ -526,13 +626,67 @@ export class DatabaseStorage implements IStorage {
     );
 
     return {
-      openVariances: varianceAlerts.length,
-      missingEndShifts: missingEndAlerts.length,
-      receiptsToday: receiptsToday.length,
+      openVariances: alertCounts.variances,
+      missingEndShifts: alertCounts.missingEndShifts,
+      receiptsToday: receiptsTodayCount,
       totalContainers: containerOpts.length,
-      recentAlerts: allAlerts.slice(0, 10),
+      recentAlerts,
       cashPositions,
     };
+  }
+
+  // Efficient query: count receipts since a given date
+  async getReceiptsCountSince(since: Date) {
+    const [result] = await db
+      .select({ count: sql<string>`COUNT(*)` })
+      .from(receipts)
+      .where(gte(receipts.createdAt, since));
+    return parseInt(result?.count || "0");
+  }
+
+  // Efficient query: find start shifts older than a given date with no matching end shift
+  async getOpenStartShifts(olderThan: Date) {
+    // Get start shifts that are old enough and haven't been closed
+    const result = await db
+      .select({
+        id: shiftCounts.id,
+        containerId: shiftCounts.containerId,
+        estheticianId: shiftCounts.estheticianId,
+        createdAt: shiftCounts.createdAt,
+        containerName: containers.name,
+        locationName: locations.name,
+        marketName: markets.name,
+        estheticianName: estheticians.name,
+      })
+      .from(shiftCounts)
+      .innerJoin(containers, eq(shiftCounts.containerId, containers.id))
+      .innerJoin(locations, eq(containers.locationId, locations.id))
+      .innerJoin(markets, eq(locations.marketId, markets.id))
+      .innerJoin(estheticians, eq(shiftCounts.estheticianId, estheticians.id))
+      .where(and(
+        eq(shiftCounts.type, "start"),
+        lt(shiftCounts.createdAt, olderThan)
+      ));
+
+    // Filter out those that have a corresponding end shift after the start
+    const openShifts = [];
+    for (const startShift of result) {
+      const [endShift] = await db
+        .select({ id: shiftCounts.id })
+        .from(shiftCounts)
+        .where(and(
+          eq(shiftCounts.type, "end"),
+          eq(shiftCounts.containerId, startShift.containerId),
+          eq(shiftCounts.estheticianId, startShift.estheticianId),
+          gte(shiftCounts.createdAt, startShift.createdAt!)
+        ))
+        .limit(1);
+
+      if (!endShift) {
+        openShifts.push(startShift);
+      }
+    }
+    return openShifts;
   }
 }
 

@@ -5,7 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Bell, Search, CheckCircle2, AlertTriangle, Clock, Receipt } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -60,7 +60,7 @@ export default function AlertsPage() {
     },
   });
 
-  const filtered = alerts?.filter((a) => {
+  const filtered = useMemo(() => alerts?.filter((a) => {
     if (search) {
       const q = search.toLowerCase();
       if (!(a.staffName || "").toLowerCase().includes(q) &&
@@ -70,7 +70,7 @@ export default function AlertsPage() {
     if (statusFilter !== "all" && a.status !== statusFilter) return false;
     if (typeFilter !== "all" && a.type !== typeFilter) return false;
     return true;
-  }) || [];
+  }) || [], [alerts, search, statusFilter, typeFilter]);
 
   return (
     <div className="space-y-6">

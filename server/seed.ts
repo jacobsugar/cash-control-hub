@@ -1,204 +1,121 @@
 import { db } from "./storage";
 import {
-  markets, locations, containers, estheticians, adminUsers,
-  shiftCounts, alerts, boulevardTransactions,
+  markets, locations, containers, adminUsers,
 } from "@shared/schema";
-import { eq } from "drizzle-orm";
 
 export async function seed() {
   const existingMarkets = await db.select().from(markets);
   if (existingMarkets.length > 0) return;
 
-  console.log("Seeding database with sample data...");
+  console.log("Seeding database with Hello Sugar locations...");
 
   // Markets
-  const [dallas] = await db.insert(markets).values({ name: "Dallas" }).returning();
-  const [houston] = await db.insert(markets).values({ name: "Houston" }).returning();
+  const [lasVegas] = await db.insert(markets).values({ name: "Las Vegas" }).returning();
   const [austin] = await db.insert(markets).values({ name: "Austin" }).returning();
 
-  // Locations
-  const [uptown] = await db.insert(locations).values({
-    name: "Uptown",
-    marketId: dallas.id,
+  // Las Vegas market locations
+  const [springValley] = await db.insert(locations).values({
+    name: "Spring Valley 077",
+    marketId: lasVegas.id,
     type: "suite",
-    timezone: "America/Chicago",
+    timezone: "America/Los_Angeles",
+    boulevardLocationId: "urn:blvd:Location:da3e4afb-8a87-4c09-832a-cd75136fbe11",
   }).returning();
 
-  const [deepEllum] = await db.insert(locations).values({
-    name: "Deep Ellum",
-    marketId: dallas.id,
+  const [summerlin] = await db.insert(locations).values({
+    name: "Summerlin 059",
+    marketId: lasVegas.id,
+    type: "suite",
+    timezone: "America/Los_Angeles",
+    boulevardLocationId: "urn:blvd:Location:a3d4dab0-8d00-417f-8d8b-905c56fbe705",
+  }).returning();
+
+  const [aliante] = await db.insert(locations).values({
+    name: "Aliante 023",
+    marketId: lasVegas.id,
+    type: "suite",
+    timezone: "America/Los_Angeles",
+    boulevardLocationId: "urn:blvd:Location:4d3266af-76f3-41ef-b360-d4eca81901f7",
+  }).returning();
+
+  const [theDistrict] = await db.insert(locations).values({
+    name: "The District 058",
+    marketId: lasVegas.id,
+    type: "suite",
+    timezone: "America/Los_Angeles",
+    boulevardLocationId: "urn:blvd:Location:33b869ca-375c-4a81-9933-bff91999d988",
+  }).returning();
+
+  const [greenValley] = await db.insert(locations).values({
+    name: "Green Valley 014",
+    marketId: lasVegas.id,
     type: "flagship",
-    timezone: "America/Chicago",
+    timezone: "America/Los_Angeles",
     dailyFloat: "20.00",
+    boulevardLocationId: "urn:blvd:Location:22353906-d8d4-4068-9c1e-d474ca512f98",
   }).returning();
 
-  const [montrose] = await db.insert(locations).values({
-    name: "Montrose",
-    marketId: houston.id,
-    type: "suite",
-    timezone: "America/Chicago",
-  }).returning();
-
-  const [domainLoc] = await db.insert(locations).values({
-    name: "The Domain",
+  // Austin market locations
+  const [parkside] = await db.insert(locations).values({
+    name: "Parkside 060",
     marketId: austin.id,
     type: "suite",
     timezone: "America/Chicago",
+    boulevardLocationId: "urn:blvd:Location:0073dfb5-dc5d-4908-8533-9eb3d9f6e654",
   }).returning();
 
-  // Containers
-  const [suiteA] = await db.insert(containers).values({
-    name: "Suite A",
-    locationId: uptown.id,
-    currentBalance: "145.00",
+  const [allendale] = await db.insert(locations).values({
+    name: "Allendale 025",
+    marketId: austin.id,
+    type: "suite",
+    timezone: "America/Chicago",
+    boulevardLocationId: "urn:blvd:Location:149753ed-48d9-45b7-bc6e-683bb6e8fa54",
   }).returning();
 
-  const [suiteB] = await db.insert(containers).values({
-    name: "Suite B",
-    locationId: uptown.id,
-    currentBalance: "80.00",
+  const [roundRock] = await db.insert(locations).values({
+    name: "Round Rock 051",
+    marketId: austin.id,
+    type: "suite",
+    timezone: "America/Chicago",
+    boulevardLocationId: "urn:blvd:Location:e9b2cecf-4003-4104-aeb7-eb6605796b8f",
   }).returning();
 
-  const [mainTill] = await db.insert(containers).values({
+  const [cedarPark] = await db.insert(locations).values({
+    name: "Cedar Park 217",
+    marketId: austin.id,
+    type: "suite",
+    timezone: "America/Chicago",
+    boulevardLocationId: "urn:blvd:Location:fb5acf9d-0725-4cbc-a4e4-d8560b4690e9",
+  }).returning();
+
+  // Containers — suites get rooms, flagship gets Main Till
+
+  // 1-room suites
+  for (const loc of [springValley, summerlin, theDistrict, parkside, cedarPark]) {
+    await db.insert(containers).values({ name: "Suite 1", locationId: loc.id });
+  }
+
+  // 2-room suites
+  for (const loc of [aliante, allendale, roundRock]) {
+    await db.insert(containers).values([
+      { name: "Suite 1", locationId: loc.id },
+      { name: "Suite 2", locationId: loc.id },
+    ]);
+  }
+
+  // Flagship — Main Till auto-created by createLocation, but seed inserts directly
+  await db.insert(containers).values({
     name: "Main Till",
-    locationId: deepEllum.id,
+    locationId: greenValley.id,
     currentBalance: "20.00",
-  }).returning();
+  });
 
-  const [montroseSuiteA] = await db.insert(containers).values({
-    name: "Suite A",
-    locationId: montrose.id,
-    currentBalance: "210.00",
-  }).returning();
-
-  const [domainSuiteA] = await db.insert(containers).values({
-    name: "Suite A",
-    locationId: domainLoc.id,
-    currentBalance: "65.00",
-  }).returning();
-
-  // Estheticians
-  const [sarah] = await db.insert(estheticians).values({ name: "Sarah Johnson" }).returning();
-  const [maria] = await db.insert(estheticians).values({ name: "Maria Garcia" }).returning();
-  const [jessica] = await db.insert(estheticians).values({ name: "Jessica Chen" }).returning();
-  const [ashley] = await db.insert(estheticians).values({ name: "Ashley Williams" }).returning();
-  const [taylor] = await db.insert(estheticians).values({ name: "Taylor Brown" }).returning();
-
-  // Admin users
+  // Admin user
   await db.insert(adminUsers).values({
     email: "admin@hellosugar.salon",
     name: "Admin",
     role: "owner",
   });
 
-  // Sample shift counts
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  yesterday.setHours(9, 0, 0, 0);
-
-  await db.insert(shiftCounts).values([
-    {
-      containerId: suiteA.id,
-      estheticianId: sarah.id,
-      type: "start",
-      countedAmount: "100.00",
-      expectedAmount: "100.00",
-    },
-    {
-      containerId: suiteA.id,
-      estheticianId: sarah.id,
-      type: "end",
-      countedAmount: "145.00",
-      expectedAmount: "145.00",
-    },
-    {
-      containerId: suiteB.id,
-      estheticianId: maria.id,
-      type: "start",
-      countedAmount: "50.00",
-      expectedAmount: "50.00",
-    },
-    {
-      containerId: suiteB.id,
-      estheticianId: maria.id,
-      type: "end",
-      countedAmount: "80.00",
-      expectedAmount: "85.00",
-      discrepancyNote: "Could not find the $5 difference, may have miscounted earlier",
-    },
-    {
-      containerId: montroseSuiteA.id,
-      estheticianId: jessica.id,
-      type: "start",
-      countedAmount: "200.00",
-      expectedAmount: "200.00",
-    },
-  ]);
-
-  // Sample Boulevard transactions
-  const today = new Date();
-  await db.insert(boulevardTransactions).values([
-    {
-      date: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 10, 30),
-      locationId: uptown.id,
-      appointmentId: "APT-001",
-      amount: "25.00",
-      staffName: "Sarah Johnson",
-      clientName: "Emily Davis",
-      paymentType: "cash",
-    },
-    {
-      date: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 11, 15),
-      locationId: uptown.id,
-      appointmentId: "APT-002",
-      amount: "45.00",
-      staffName: "Sarah Johnson",
-      clientName: "Rachel Kim",
-      paymentType: "cash",
-    },
-    {
-      date: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 14, 0),
-      locationId: montrose.id,
-      appointmentId: "APT-003",
-      amount: "35.00",
-      staffName: "Jessica Chen",
-      clientName: "Amanda Torres",
-      paymentType: "cash",
-    },
-    {
-      date: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 9, 45),
-      locationId: deepEllum.id,
-      appointmentId: "APT-004",
-      amount: "60.00",
-      staffName: "Ashley Williams",
-      clientName: "Nicole Baker",
-      paymentType: "cash",
-    },
-  ]);
-
-  // Sample alerts
-  await db.insert(alerts).values([
-    {
-      type: "end_mismatch",
-      status: "active",
-      staffName: "Maria Garcia",
-      marketName: "Dallas",
-      locationName: "Uptown",
-      containerName: "Suite B",
-      expectedAmount: "85.00",
-      actualAmount: "80.00",
-      note: "Could not find the $5 difference",
-    },
-    {
-      type: "missing_end_shift",
-      status: "active",
-      staffName: "Jessica Chen",
-      marketName: "Houston",
-      locationName: "Montrose",
-      containerName: "Suite A",
-      note: "Start shift submitted but no end shift recorded",
-    },
-  ]);
-
-  console.log("Seed data inserted successfully.");
+  console.log("Seed data inserted: 2 markets, 9 locations, 12 containers.");
 }

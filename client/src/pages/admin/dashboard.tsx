@@ -70,6 +70,8 @@ function AlertTypeLabel({ type }: { type: string }) {
 export default function AdminDashboard() {
   const { data: stats, isLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/admin/dashboard"],
+    staleTime: 30_000, // Refresh dashboard data after 30 seconds
+    refetchInterval: 60_000, // Auto-poll every minute
   });
 
   return (

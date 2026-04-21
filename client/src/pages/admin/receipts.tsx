@@ -4,7 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Search, Receipt, Eye, X, Download, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Receipt as ReceiptType } from "@shared/schema";
 
@@ -23,14 +23,14 @@ export default function ReceiptsPage() {
     queryKey: ["/api/admin/receipts"],
   });
 
-  const filtered = receipts?.filter((r) => {
+  const filtered = useMemo(() => receipts?.filter((r) => {
     if (!search) return true;
     const q = search.toLowerCase();
     return r.estheticianName.toLowerCase().includes(q) ||
       r.containerName.toLowerCase().includes(q) ||
       r.locationName.toLowerCase().includes(q) ||
       (r.note || "").toLowerCase().includes(q);
-  }) || [];
+  }) || [], [receipts, search]);
 
   const selectedReceipt = filtered.find((r) => r.id === selectedId) || null;
   const selectedIndex = selectedReceipt ? filtered.indexOf(selectedReceipt) : -1;
