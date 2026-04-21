@@ -4,7 +4,6 @@ import { storage } from "./storage";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { parse } from "csv-parse/sync";
 import session from "express-session";
 import OpenAI from "openai";
 import * as boulevard from "./boulevard";
@@ -205,15 +204,41 @@ async function syncBoulevardLocation(blvdLocationId: string, appLocationId: numb
   return { imported, skipped, total: cashOrders.length };
 }
 
-async function syncAllBoulevardLocations() {
+async function syncBoulevardLocationWithHistory(
+  blvdLocationId: string,
+  appLocationId: number,
+  locationName: string,
+  syncType: "auto" | "manual" | "count",
+  sinceDays: number
+) {
+  const entry = await storage.createSyncHistoryEntry({
+    locationId: appLocationId,
+    locationName,
+    syncType,
+    status: "success",
+    startedAt: new Date(),
+  });
+
+  try {
+    const result = await syncBoulevardLocation(blvdLocationId, appLocationId, sinceDays);
+    await storage.completeSyncHistoryEntry(entry.id, "success", result.imported);
+    return result;
+  } catch (err: any) {
+    await storage.completeSyncHistoryEntry(entry.id, "error", 0, err.message);
+    throw err;
+  }
+}
+
+async function syncAllBoulevardLocations(syncType: "auto" | "manual" = "auto") {
   const mappedLocations = await storage.getBoulevardMappedLocations();
   const results: { locationName: string; imported: number; skipped: number; error?: string }[] = [];
   let totalImported = 0;
 
   for (const loc of mappedLocations) {
     try {
-      // Sync last 2 days for auto-sync (enough overlap to catch anything missed)
-      const result = await syncBoulevardLocation(loc.boulevardLocationId!, loc.id, 2);
+      const result = await syncBoulevardLocationWithHistory(
+        loc.boulevardLocationId!, loc.id, loc.name, syncType, 2
+      );
       results.push({ locationName: loc.name, imported: result.imported, skipped: result.skipped });
       totalImported += result.imported;
     } catch (err: any) {
@@ -223,6 +248,27 @@ async function syncAllBoulevardLocations() {
   }
 
   return { totalImported, locations: results };
+}
+
+let boulevardSyncInterval: ReturnType<typeof setInterval> | null = null;
+async function startBoulevardAutoSync() {
+  if (boulevardSyncInterval) clearInterval(boulevardSyncInterval);
+
+  const freqStr = await storage.getSetting("boulevard_sync_frequency_minutes");
+  const minutes = parseInt(freqStr || "10") || 10;
+
+  boulevardSyncInterval = setInterval(async () => {
+    try {
+      const result = await syncAllBoulevardLocations("auto");
+      if (result.totalImported > 0) {
+        console.log(`Boulevard auto-sync: imported ${result.totalImported} transactions`);
+      }
+    } catch (err) {
+      console.error("Boulevard auto-sync error:", err);
+    }
+  }, minutes * 60 * 1000);
+
+  console.log(`Boulevard auto-sync scheduled every ${minutes} minutes`);
 }
 
 export async function registerRoutes(
@@ -783,77 +829,6 @@ export async function registerRoutes(
     }
   });
 
-  // Boulevard CSV import
-  app.post("/api/admin/boulevard/import", requireAdmin, upload.single("file"), async (req, res) => {
-    try {
-      if (!req.file) return res.status(400).send("No file uploaded");
-      const locationId = req.body.locationId ? parseInt(req.body.locationId) : null;
-
-      const fileContent = fs.readFileSync(req.file.path, "utf-8");
-      const records = parse(fileContent, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      });
-
-      const locationsWithMarket = await storage.getLocationsWithMarket();
-      let imported = 0;
-      let skippedNonCash = 0;
-      let skippedNoLocation = 0;
-
-      for (const record of records) {
-        const dateStr = record.Date || record.date || "";
-        const merchantStr = record.Merchant || record.merchant || "";
-        const orderId = record["Order #"] || record.order_id || "";
-        const clientName = record.Client || record.client || "";
-        const operatorName = record.Operator || record.operator || "";
-        const method = record.Method || record.method || "";
-        const amountStr = record.Amount || record.amount || "0";
-
-        if (!method.toLowerCase().includes("cash")) {
-          skippedNonCash++;
-          continue;
-        }
-
-        let resolvedLocationId = locationId;
-        if (!resolvedLocationId && merchantStr) {
-          const matched = locationsWithMarket.find(
-            (l) => l.name.toLowerCase() === merchantStr.toLowerCase()
-          );
-          if (matched) resolvedLocationId = matched.id;
-        }
-
-        if (!resolvedLocationId) {
-          skippedNoLocation++;
-          continue;
-        }
-
-        const amount = parseFloat(amountStr.replace(/[^0-9.-]/g, ""));
-        if (isNaN(amount) || amount === 0) continue;
-
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) continue;
-
-        await storage.createBoulevardTransaction({
-          date,
-          locationId: resolvedLocationId,
-          orderId: orderId || null,
-          amount: amount.toFixed(2),
-          operatorName: operatorName || null,
-          clientName: clientName || null,
-          paymentMethod: "cash",
-        });
-        imported++;
-      }
-
-      fs.unlinkSync(req.file.path);
-
-      res.json({ imported, total: records.length, skippedNonCash, skippedNoLocation });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
   // Boulevard API integration
   app.get("/api/admin/boulevard/status", requireAdmin, async (_req, res) => {
     try {
@@ -886,12 +861,19 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Boulevard API not configured" });
       }
 
-      const { blvdLocationId, locationId, sinceDays } = req.body;
-      if (!blvdLocationId || !locationId) {
-        return res.status(400).json({ message: "blvdLocationId and locationId are required" });
+      const { locationId, sinceDays } = req.body;
+      if (!locationId) {
+        return res.status(400).json({ message: "locationId is required" });
       }
 
-      const result = await syncBoulevardLocation(blvdLocationId, locationId, sinceDays || 7);
+      const location = await storage.getLocation(parseInt(locationId));
+      if (!location?.boulevardLocationId) {
+        return res.status(400).json({ message: "Location not mapped to Boulevard" });
+      }
+
+      const result = await syncBoulevardLocationWithHistory(
+        location.boulevardLocationId, location.id, location.name, "manual", sinceDays || 7
+      );
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -904,26 +886,109 @@ export async function registerRoutes(
       if (!boulevard.isConfigured()) {
         return res.status(400).json({ message: "Boulevard API not configured" });
       }
-      const result = await syncAllBoulevardLocations();
+      const result = await syncAllBoulevardLocations("manual");
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
   });
 
-  // Auto-sync Boulevard every 10 minutes
-  if (boulevard.isConfigured()) {
-    setInterval(async () => {
-      try {
-        const result = await syncAllBoulevardLocations();
-        if (result.totalImported > 0) {
-          console.log(`Boulevard auto-sync: imported ${result.totalImported} new transactions across ${result.locations.length} locations`);
-        }
-      } catch (err) {
-        console.error("Boulevard auto-sync error:", err);
+  // Sync frequency configuration
+  app.post("/api/admin/boulevard/sync-frequency", requireAdmin, async (req, res) => {
+    try {
+      const { minutes } = req.body;
+      if (![5, 10, 15, 30, 60].includes(minutes)) {
+        return res.status(400).json({ message: "Invalid frequency. Options: 5, 10, 15, 30, 60" });
       }
-    }, 10 * 60 * 1000); // 10 minutes
-    console.log("Boulevard auto-sync scheduled every 10 minutes");
+      await storage.upsertSetting("boulevard_sync_frequency_minutes", String(minutes));
+      await startBoulevardAutoSync();
+      res.json({ success: true, minutes });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Sync status overview
+  app.get("/api/admin/boulevard/sync-status", requireAdmin, async (_req, res) => {
+    try {
+      const [lastSync, stats, freqStr] = await Promise.all([
+        storage.getLastSyncOverall(),
+        storage.getRecentSyncStats(),
+        storage.getSetting("boulevard_sync_frequency_minutes"),
+      ]);
+      res.json({
+        lastSyncAt: lastSync?.completedAt || null,
+        lastSyncStatus: lastSync?.status || null,
+        totalImportedRecently: stats.totalImported,
+        syncFrequencyMinutes: parseInt(freqStr || "10"),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Per-location sync status
+  app.get("/api/admin/boulevard/location-sync-status", requireAdmin, async (_req, res) => {
+    try {
+      const mappedLocations = await storage.getBoulevardMappedLocations();
+      const statuses = await Promise.all(
+        mappedLocations.map(async (loc) => {
+          const lastSync = await storage.getLastSyncForLocation(loc.id);
+          return {
+            locationId: loc.id,
+            locationName: loc.name,
+            boulevardLocationId: loc.boulevardLocationId,
+            lastSyncAt: lastSync?.completedAt || null,
+            lastSyncStatus: lastSync?.status || null,
+            lastImportCount: lastSync?.transactionsImported || 0,
+          };
+        })
+      );
+      res.json(statuses);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Sync history log
+  app.get("/api/admin/boulevard/sync-history", requireAdmin, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const history = await storage.getSyncHistory(limit);
+      res.json(history);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Count-triggered sync (public, no auth — called before esthetician counts)
+  app.post("/api/boulevard/sync-for-location", async (req, res) => {
+    try {
+      const { locationId } = req.body;
+      if (!locationId) return res.status(400).json({ message: "locationId required" });
+
+      if (!boulevard.isConfigured()) {
+        return res.json({ synced: false, reason: "Boulevard not configured" });
+      }
+
+      const location = await storage.getLocation(parseInt(locationId));
+      if (!location?.boulevardLocationId) {
+        return res.json({ synced: false, reason: "Location not mapped to Boulevard" });
+      }
+
+      const result = await syncBoulevardLocationWithHistory(
+        location.boulevardLocationId, location.id, location.name, "count", 1
+      );
+      res.json({ synced: true, imported: result.imported });
+    } catch (err: any) {
+      console.error("Count-triggered sync error:", err);
+      res.json({ synced: false, reason: err.message });
+    }
+  });
+
+  // Start auto-sync
+  if (boulevard.isConfigured()) {
+    startBoulevardAutoSync();
   }
 
   // Admin Users

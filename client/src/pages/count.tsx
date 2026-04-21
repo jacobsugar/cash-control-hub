@@ -83,8 +83,25 @@ export default function CountPage() {
     },
   });
 
+  const [syncing, setSyncing] = useState(false);
+
   const handleProceedToCount = async () => {
     if (!selectedEsthetician || !selectedLocation || !selectedContainer) return;
+
+    // Sync Boulevard transactions for this location before counting
+    setSyncing(true);
+    try {
+      await fetch("/api/boulevard/sync-for-location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId: parseInt(selectedLocation) }),
+      });
+    } catch (e) {
+      // Sync failure should not block the count
+      console.warn("Boulevard sync before count failed:", e);
+    }
+    setSyncing(false);
+
     setStep("count");
   };
 
@@ -307,12 +324,12 @@ export default function CountPage() {
             <Button
               className="w-full"
               size="lg"
-              disabled={!selectedEsthetician || !selectedLocation || !selectedContainer}
+              disabled={!selectedEsthetician || !selectedLocation || !selectedContainer || syncing}
               onClick={handleProceedToCount}
               data-testid="button-proceed"
             >
-              Continue
-              <ArrowRight className="ml-2 h-4 w-4" />
+              {syncing ? "Syncing latest transactions..." : "Continue"}
+              {!syncing && <ArrowRight className="ml-2 h-4 w-4" />}
             </Button>
           </div>
         )}

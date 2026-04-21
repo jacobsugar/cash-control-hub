@@ -131,6 +131,21 @@ export const appSettings = pgTable("app_settings", {
   value: text("value").notNull(),
 });
 
+export const boulevardSyncTypeEnum = pgEnum("boulevard_sync_type", ["auto", "manual", "count"]);
+export const boulevardSyncStatusEnum = pgEnum("boulevard_sync_status", ["success", "error"]);
+
+export const boulevardSyncHistory = pgTable("boulevard_sync_history", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  locationId: integer("location_id").notNull().references(() => locations.id),
+  locationName: text("location_name").notNull(),
+  syncType: boulevardSyncTypeEnum("sync_type").notNull(),
+  status: boulevardSyncStatusEnum("status").notNull(),
+  transactionsImported: integer("transactions_imported").default(0).notNull(),
+  errorMessage: text("error_message"),
+  startedAt: timestamp("started_at").notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
 // Insert schemas
 export const insertMarketSchema = createInsertSchema(markets).omit({ id: true, createdAt: true });
 export const insertLocationSchema = createInsertSchema(locations).omit({ id: true, createdAt: true });
@@ -144,6 +159,7 @@ export const insertCashCollectionSchema = createInsertSchema(cashCollections).om
 export const insertAdminUserSchema = createInsertSchema(adminUsers).omit({ id: true, createdAt: true });
 export const insertAlertRecipientSchema = createInsertSchema(alertRecipients).omit({ id: true, createdAt: true });
 export const insertAppSettingSchema = createInsertSchema(appSettings).omit({ id: true });
+export const insertBoulevardSyncHistorySchema = createInsertSchema(boulevardSyncHistory).omit({ id: true });
 
 // Insert types
 export type InsertMarket = z.infer<typeof insertMarketSchema>;
@@ -172,3 +188,5 @@ export type CashCollection = typeof cashCollections.$inferSelect;
 export type AdminUser = typeof adminUsers.$inferSelect;
 export type AlertRecipient = typeof alertRecipients.$inferSelect;
 export type AppSetting = typeof appSettings.$inferSelect;
+export type BoulevardSyncHistory = typeof boulevardSyncHistory.$inferSelect;
+export type InsertBoulevardSyncHistory = z.infer<typeof insertBoulevardSyncHistorySchema>;

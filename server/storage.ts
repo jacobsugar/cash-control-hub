@@ -4,13 +4,14 @@ import pg from "pg";
 import {
   markets, locations, containers, estheticians, shiftCounts, receipts,
   boulevardTransactions, alerts, cashCollections, adminUsers, alertRecipients, appSettings,
+  boulevardSyncHistory,
   type InsertMarket, type InsertLocation, type InsertContainer, type InsertEsthetician,
   type InsertShiftCount, type InsertReceipt, type InsertBoulevardTransaction,
   type InsertAlert, type InsertCashCollection, type InsertAdminUser,
-  type InsertAlertRecipient, type InsertAppSetting,
+  type InsertAlertRecipient, type InsertAppSetting, type InsertBoulevardSyncHistory,
   type Market, type Location, type Container, type Esthetician, type ShiftCount,
   type Receipt, type BoulevardTransaction, type Alert, type CashCollection,
-  type AdminUser, type AlertRecipient, type AppSetting,
+  type AdminUser, type AlertRecipient, type AppSetting, type BoulevardSyncHistory as BoulevardSyncHistoryType,
 } from "@shared/schema";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
@@ -96,6 +97,14 @@ export interface IStorage {
   // Efficient queries for missing shift checks
   getOpenStartShifts(olderThan: Date): Promise<any[]>;
   getReceiptsCountSince(since: Date): Promise<number>;
+
+  // Boulevard Sync History
+  createSyncHistoryEntry(data: InsertBoulevardSyncHistory): Promise<BoulevardSyncHistoryType>;
+  completeSyncHistoryEntry(id: number, status: "success" | "error", transactionsImported: number, errorMessage?: string): Promise<void>;
+  getSyncHistory(limit?: number): Promise<BoulevardSyncHistoryType[]>;
+  getLastSyncForLocation(locationId: number): Promise<BoulevardSyncHistoryType | undefined>;
+  getLastSyncOverall(): Promise<BoulevardSyncHistoryType | undefined>;
+  getRecentSyncStats(): Promise<{ totalImported: number; lastSyncAt: string | null }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -687,6 +696,56 @@ export class DatabaseStorage implements IStorage {
       }
     }
     return openShifts;
+  }
+
+  // Boulevard Sync History
+  async createSyncHistoryEntry(data: InsertBoulevardSyncHistory) {
+    const [entry] = await db.insert(boulevardSyncHistory).values(data as any).returning();
+    return entry;
+  }
+
+  async completeSyncHistoryEntry(id: number, status: "success" | "error", transactionsImported: number, errorMessage?: string) {
+    await db.update(boulevardSyncHistory).set({
+      status: status as any,
+      transactionsImported,
+      errorMessage: errorMessage || null,
+      completedAt: new Date(),
+    }).where(eq(boulevardSyncHistory.id, id));
+  }
+
+  async getSyncHistory(limit = 50) {
+    return db.select().from(boulevardSyncHistory).orderBy(desc(boulevardSyncHistory.startedAt)).limit(limit);
+  }
+
+  async getLastSyncForLocation(locationId: number) {
+    const [last] = await db.select().from(boulevardSyncHistory)
+      .where(eq(boulevardSyncHistory.locationId, locationId))
+      .orderBy(desc(boulevardSyncHistory.startedAt))
+      .limit(1);
+    return last;
+  }
+
+  async getLastSyncOverall() {
+    const [last] = await db.select().from(boulevardSyncHistory)
+      .orderBy(desc(boulevardSyncHistory.startedAt))
+      .limit(1);
+    return last;
+  }
+
+  async getRecentSyncStats() {
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [result] = await db.select({
+      totalImported: sql<string>`COALESCE(SUM(${boulevardSyncHistory.transactionsImported}), 0)`,
+      lastSyncAt: sql<string>`MAX(${boulevardSyncHistory.completedAt})`,
+    }).from(boulevardSyncHistory)
+      .where(and(
+        eq(boulevardSyncHistory.status, "success"),
+        gte(boulevardSyncHistory.startedAt, oneDayAgo)
+      ));
+    return {
+      totalImported: parseInt(result?.totalImported || "0"),
+      lastSyncAt: result?.lastSyncAt || null,
+    };
   }
 }
 

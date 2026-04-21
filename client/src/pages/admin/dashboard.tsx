@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,7 +13,11 @@ import {
   TrendingDown,
   Bell,
   ArrowRight,
+  RefreshCw,
+  Database,
 } from "lucide-react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { DashboardStats, AlertWithDetails, ContainerWithLocation } from "@/lib/types";
 
 function StatCard({
@@ -67,11 +71,46 @@ function AlertTypeLabel({ type }: { type: string }) {
   return <Badge variant={config.variant} data-testid={`badge-alert-type-${type}`}>{config.text}</Badge>;
 }
 
+function timeAgo(dateStr: string | null): string {
+  if (!dateStr) return "Never";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 export default function AdminDashboard() {
+  const { toast } = useToast();
   const { data: stats, isLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/admin/dashboard"],
-    staleTime: 30_000, // Refresh dashboard data after 30 seconds
-    refetchInterval: 60_000, // Auto-poll every minute
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+
+  const { data: syncStatus } = useQuery<{
+    lastSyncAt: string | null;
+    lastSyncStatus: "success" | "error" | null;
+    totalImportedRecently: number;
+    syncFrequencyMinutes: number;
+  }>({
+    queryKey: ["/api/admin/boulevard/sync-status"],
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+
+  const syncAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/boulevard/sync-all");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/boulevard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/dashboard"] });
+      toast({ title: "Sync complete", description: `Imported ${data.totalImported} new transactions` });
+    },
   });
 
   return (
@@ -121,6 +160,40 @@ export default function AdminDashboard() {
           </>
         )}
       </div>
+
+      {/* Boulevard Sync Card */}
+      <Card>
+        <CardContent className="pt-4 pb-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10">
+                <Database className="h-4 w-4 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-medium">Boulevard Sync</p>
+                <p className="text-xs text-muted-foreground">
+                  Last sync: {timeAgo(syncStatus?.lastSyncAt || null)}
+                  {syncStatus?.lastSyncStatus === "success" && " · "}
+                  {syncStatus?.lastSyncStatus === "success" && <span className="text-green-600">Healthy</span>}
+                  {syncStatus?.lastSyncStatus === "error" && " · "}
+                  {syncStatus?.lastSyncStatus === "error" && <span className="text-destructive">Error</span>}
+                  {" · "}{syncStatus?.totalImportedRecently ?? 0} imported today
+                  {" · Every "}{syncStatus?.syncFrequencyMinutes ?? 10}m
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => syncAllMutation.mutate()}
+              disabled={syncAllMutation.isPending}
+            >
+              <RefreshCw className={`h-3 w-3 mr-1 ${syncAllMutation.isPending ? "animate-spin" : ""}`} />
+              {syncAllMutation.isPending ? "Syncing..." : "Sync Now"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid lg:grid-cols-2 gap-6">
         <Card>
