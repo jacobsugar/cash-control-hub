@@ -637,6 +637,15 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/locations/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.updateLocation(parseInt(req.params.id), req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.delete("/api/locations/:id", requireAdmin, async (req, res) => {
     try {
       await storage.deleteLocation(parseInt(req.params.id));
@@ -647,6 +656,15 @@ export async function registerRoutes(
   });
 
   // Containers
+  app.patch("/api/containers/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.updateContainer(parseInt(req.params.id), req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/containers", requireAdmin, async (req, res) => {
     try {
       const container = await storage.createContainer(req.body);

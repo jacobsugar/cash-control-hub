@@ -29,6 +29,7 @@ export interface IStorage {
   getLocationsWithMarket(): Promise<(Location & { marketName: string })[]>;
   getLocationsWithContainers(): Promise<(Location & { marketName: string; containers: Container[] })[]>;
   createLocation(data: InsertLocation): Promise<Location>;
+  updateLocation(id: number, data: Partial<InsertLocation>): Promise<void>;
   deleteLocation(id: number): Promise<void>;
 
   // Containers
@@ -36,6 +37,7 @@ export interface IStorage {
   getContainerOptions(): Promise<any[]>;
   getContainer(id: number): Promise<Container | undefined>;
   createContainer(data: InsertContainer): Promise<Container>;
+  updateContainer(id: number, data: Partial<InsertContainer>): Promise<void>;
   updateContainerBalance(id: number, balance: string): Promise<void>;
   deleteContainer(id: number): Promise<void>;
 
@@ -201,6 +203,10 @@ export class DatabaseStorage implements IStorage {
     return location;
   }
 
+  async updateLocation(id: number, data: Partial<InsertLocation>) {
+    await db.update(locations).set(data as any).where(eq(locations.id, id));
+  }
+
   async deleteLocation(id: number) {
     const locationContainers = await db.select({ id: containers.id }).from(containers).where(eq(containers.locationId, id));
     for (const c of locationContainers) {
@@ -240,6 +246,10 @@ export class DatabaseStorage implements IStorage {
   async createContainer(data: InsertContainer) {
     const [container] = await db.insert(containers).values(data).returning();
     return container;
+  }
+
+  async updateContainer(id: number, data: Partial<InsertContainer>) {
+    await db.update(containers).set(data as any).where(eq(containers.id, id));
   }
 
   async updateContainerBalance(id: number, balance: string) {

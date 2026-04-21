@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Building2, Plus, Trash2, Box, ExternalLink, Copy } from "lucide-react";
+import { Building2, Plus, Trash2, Box, ExternalLink, Copy, Pencil, Check, X } from "lucide-react";
 import type { Market, Location, Container } from "@shared/schema";
 
 interface LocationWithDetails extends Location {
@@ -92,6 +92,58 @@ export default function LocationsPage() {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     },
   });
+
+  const updateLocMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: any }) => {
+      await apiRequest("PATCH", `/api/locations/${id}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/locations-with-containers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/locations/with-market"] });
+      setEditingLocId(null);
+      toast({ title: "Location updated" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const updateContainerMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: any }) => {
+      await apiRequest("PATCH", `/api/containers/${id}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/locations-with-containers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/container-options"] });
+      setEditingContainerId(null);
+      toast({ title: "Suite updated" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const [editingLocId, setEditingLocId] = useState<number | null>(null);
+  const [editLocName, setEditLocName] = useState("");
+  const [editLocType, setEditLocType] = useState<"suite" | "flagship">("suite");
+  const [editLocTimezone, setEditLocTimezone] = useState("");
+  const [editLocFloat, setEditLocFloat] = useState("");
+
+  const [editingContainerId, setEditingContainerId] = useState<number | null>(null);
+  const [editContainerName, setEditContainerName] = useState("");
+
+  const startEditLocation = (loc: LocationWithDetails) => {
+    setEditingLocId(loc.id);
+    setEditLocName(loc.name);
+    setEditLocType(loc.type);
+    setEditLocTimezone(loc.timezone);
+    setEditLocFloat(loc.dailyFloat || "20.00");
+  };
+
+  const startEditContainer = (c: Container) => {
+    setEditingContainerId(c.id);
+    setEditContainerName(c.name);
+  };
 
   const timezones = [
     "America/New_York", "America/Chicago", "America/Denver",
@@ -271,31 +323,94 @@ export default function LocationsPage() {
                     <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10">
                       <Building2 className="h-4 w-4 text-primary" />
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-medium" data-testid={`text-location-${loc.id}`}>{loc.name}</p>
-                        <Badge variant={loc.type === "flagship" ? "default" : "secondary"}>
-                          {loc.type}
-                        </Badge>
+                    {editingLocId === loc.id ? (
+                      <div className="space-y-2 flex-1">
+                        <Input
+                          value={editLocName}
+                          onChange={(e) => setEditLocName(e.target.value)}
+                          placeholder="Location name"
+                          className="h-8"
+                        />
+                        <div className="flex gap-2 flex-wrap">
+                          <Select value={editLocType} onValueChange={(v) => setEditLocType(v as "suite" | "flagship")}>
+                            <SelectTrigger className="w-[140px] h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="suite">Suite</SelectItem>
+                              <SelectItem value="flagship">Flagship</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Select value={editLocTimezone} onValueChange={setEditLocTimezone}>
+                            <SelectTrigger className="w-[200px] h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {timezones.map((tz) => (
+                                <SelectItem key={tz} value={tz}>{tz}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {editLocType === "flagship" && (
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={editLocFloat}
+                              onChange={(e) => setEditLocFloat(e.target.value)}
+                              placeholder="Daily float"
+                              className="w-[100px] h-8"
+                            />
+                          )}
+                        </div>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="default" className="h-7"
+                            onClick={() => updateLocMutation.mutate({
+                              id: loc.id,
+                              data: { name: editLocName.trim(), type: editLocType, timezone: editLocTimezone, dailyFloat: editLocType === "flagship" ? editLocFloat : loc.dailyFloat },
+                            })}
+                            disabled={!editLocName.trim() || updateLocMutation.isPending}
+                          >
+                            <Check className="h-3 w-3 mr-1" />Save
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-7" onClick={() => setEditingLocId(null)}>
+                            <X className="h-3 w-3 mr-1" />Cancel
+                          </Button>
+                        </div>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        {loc.marketName} &middot; {loc.timezone}
-                        {loc.type === "flagship" && ` · $${loc.dailyFloat} daily float`}
-                      </p>
-                    </div>
+                    ) : (
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium" data-testid={`text-location-${loc.id}`}>{loc.name}</p>
+                          <Badge variant={loc.type === "flagship" ? "default" : "secondary"}>
+                            {loc.type}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {loc.marketName} &middot; {loc.timezone}
+                          {loc.type === "flagship" && ` · $${loc.dailyFloat} daily float`}
+                        </p>
+                      </div>
+                    )}
                   </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => {
-                      if (confirm("Delete this location and all its suites?")) {
-                        deleteLocMutation.mutate(loc.id);
-                      }
-                    }}
-                    data-testid={`button-delete-location-${loc.id}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex gap-1">
+                    {editingLocId !== loc.id && (
+                      <Button size="icon" variant="ghost" onClick={() => startEditLocation(loc)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => {
+                        if (confirm("Delete this location and all its suites?")) {
+                          deleteLocMutation.mutate(loc.id);
+                        }
+                      }}
+                      data-testid={`button-delete-location-${loc.id}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 ml-12 mb-3">
                   <code className="text-xs bg-muted px-2 py-1 rounded-md flex-1 min-w-0 truncate" data-testid={`text-location-url-${loc.id}`}>
@@ -329,25 +444,58 @@ export default function LocationsPage() {
                         className="flex items-center justify-between gap-2 rounded-md border p-2"
                         data-testid={`container-item-${c.id}`}
                       >
-                        <div className="flex items-center gap-2">
-                          <Box className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-sm">{c.name}</span>
-                          <span className="text-xs text-muted-foreground font-mono">
-                            ${parseFloat(c.currentBalance).toFixed(2)}
-                          </span>
-                        </div>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => {
-                            if (confirm("Delete this suite?")) {
-                              deleteContainerMutation.mutate(c.id);
-                            }
-                          }}
-                          data-testid={`button-delete-container-${c.id}`}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
+                        {editingContainerId === c.id ? (
+                          <div className="flex items-center gap-2 flex-1">
+                            <Box className="h-3 w-3 text-muted-foreground shrink-0" />
+                            <Input
+                              value={editContainerName}
+                              onChange={(e) => setEditContainerName(e.target.value)}
+                              className="h-7 text-sm"
+                              autoFocus
+                            />
+                            <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0"
+                              onClick={() => updateContainerMutation.mutate({ id: c.id, data: { name: editContainerName.trim() } })}
+                              disabled={!editContainerName.trim()}
+                            >
+                              <Check className="h-3 w-3" />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0"
+                              onClick={() => setEditingContainerId(null)}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-2">
+                              <Box className="h-3 w-3 text-muted-foreground" />
+                              <span className="text-sm">{c.name}</span>
+                              <span className="text-xs text-muted-foreground font-mono">
+                                ${parseFloat(c.currentBalance).toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="flex gap-0.5">
+                              <Button size="icon" variant="ghost" className="h-7 w-7"
+                                onClick={() => startEditContainer(c)}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7"
+                                onClick={() => {
+                                  if (confirm("Delete this suite?")) {
+                                    deleteContainerMutation.mutate(c.id);
+                                  }
+                                }}
+                                data-testid={`button-delete-container-${c.id}`}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
