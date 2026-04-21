@@ -112,8 +112,8 @@ export async function seed() {
 
   // Admin user
   await db.insert(adminUsers).values({
-    email: "admin@hellosugar.salon",
-    name: "Admin",
+    email: "jacob@hellosugar.salon",
+    name: "Jacob Parry",
     role: "owner",
   });
 
