@@ -22,6 +22,9 @@ interface SyncStatus {
   lastSyncStatus: "success" | "error" | null;
   totalImportedRecently: number;
   syncFrequencyMinutes: number;
+  operatingStartHour: number;
+  operatingEndHour: number;
+  currentlySyncing: boolean;
 }
 
 interface LocationSyncStatus {
@@ -127,6 +130,17 @@ export default function BoulevardPage() {
     },
   });
 
+  const operatingHoursMutation = useMutation({
+    mutationFn: async ({ startHour, endHour }: { startHour: number; endHour: number }) => {
+      const res = await apiRequest("POST", "/api/admin/boulevard/operating-hours", { startHour, endHour });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/boulevard/sync-status"] });
+      toast({ title: "Operating hours updated" });
+    },
+  });
+
   const filtered = useMemo(() => transactions?.filter((t) => {
     if (search) {
       const q = search.toLowerCase();
@@ -204,6 +218,56 @@ export default function BoulevardPage() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">Operating Hours</p>
+                <p className="text-sm font-medium">
+                  {syncStatus?.operatingStartHour ?? 7}:00 - {syncStatus?.operatingEndHour ?? 21}:00
+                  {syncStatus && !syncStatus.currentlySyncing && (
+                    <span className="text-xs text-muted-foreground ml-1">(paused)</span>
+                  )}
+                </p>
+              </div>
+              <div className="flex gap-1">
+                <Select
+                  value={String(syncStatus?.operatingStartHour ?? 7)}
+                  onValueChange={(v) => operatingHoursMutation.mutate({
+                    startHour: parseInt(v),
+                    endHour: syncStatus?.operatingEndHour ?? 21,
+                  })}
+                >
+                  <SelectTrigger className="w-[70px] h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 24 }, (_, i) => (
+                      <SelectItem key={i} value={String(i)}>{i}:00</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="self-center text-xs text-muted-foreground">to</span>
+                <Select
+                  value={String(syncStatus?.operatingEndHour ?? 21)}
+                  onValueChange={(v) => operatingHoursMutation.mutate({
+                    startHour: syncStatus?.operatingStartHour ?? 7,
+                    endHour: parseInt(v),
+                  })}
+                >
+                  <SelectTrigger className="w-[70px] h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 24 }, (_, i) => (
+                      <SelectItem key={i} value={String(i)}>{i}:00</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>

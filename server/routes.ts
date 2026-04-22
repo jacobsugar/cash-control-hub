@@ -301,6 +301,25 @@ async function syncStaffFromBoulevard() {
   return { synced: allSeenStaffIds.length, locations: mappedLocations.length };
 }
 
+function isWithinOperatingHours(startHour: number, endHour: number, timezone: string): boolean {
+  const now = new Date();
+  const timeStr = now.toLocaleString("en-US", { timeZone: timezone, hour: "numeric", hour12: false });
+  const hour = parseInt(timeStr);
+  // startHour=7, endHour=21 means operate between 7am-9pm
+  return hour >= startHour && hour < endHour;
+}
+
+async function shouldSync(): Promise<boolean> {
+  const startStr = await storage.getSetting("sync_operating_start_hour");
+  const endStr = await storage.getSetting("sync_operating_end_hour");
+  const startHour = parseInt(startStr || "7");
+  const endHour = parseInt(endStr || "21");
+
+  // Check both timezones — sync if ANY market is within operating hours
+  return isWithinOperatingHours(startHour, endHour, "America/Los_Angeles") ||
+         isWithinOperatingHours(startHour, endHour, "America/Chicago");
+}
+
 let boulevardSyncInterval: ReturnType<typeof setInterval> | null = null;
 async function startBoulevardAutoSync() {
   if (boulevardSyncInterval) clearInterval(boulevardSyncInterval);
@@ -310,6 +329,9 @@ async function startBoulevardAutoSync() {
 
   boulevardSyncInterval = setInterval(async () => {
     try {
+      // Skip sync outside operating hours
+      if (!(await shouldSync())) return;
+
       const result = await syncAllBoulevardLocations("auto");
       if (result.totalImported > 0) {
         console.log(`Boulevard auto-sync: imported ${result.totalImported} transactions`);
@@ -991,19 +1013,57 @@ export async function registerRoutes(
     }
   });
 
+  // Operating hours configuration
+  app.get("/api/admin/boulevard/operating-hours", requireAdmin, async (_req, res) => {
+    try {
+      const [startStr, endStr] = await Promise.all([
+        storage.getSetting("sync_operating_start_hour"),
+        storage.getSetting("sync_operating_end_hour"),
+      ]);
+      res.json({
+        startHour: parseInt(startStr || "7"),
+        endHour: parseInt(endStr || "21"),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/boulevard/operating-hours", requireAdmin, async (req, res) => {
+    try {
+      const { startHour, endHour } = req.body;
+      if (startHour < 0 || startHour > 23 || endHour < 0 || endHour > 23) {
+        return res.status(400).json({ message: "Hours must be between 0 and 23" });
+      }
+      await Promise.all([
+        storage.upsertSetting("sync_operating_start_hour", String(startHour)),
+        storage.upsertSetting("sync_operating_end_hour", String(endHour)),
+      ]);
+      res.json({ success: true, startHour, endHour });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // Sync status overview
   app.get("/api/admin/boulevard/sync-status", requireAdmin, async (_req, res) => {
     try {
-      const [lastSync, stats, freqStr] = await Promise.all([
+      const [lastSync, stats, freqStr, startStr, endStr] = await Promise.all([
         storage.getLastSyncOverall(),
         storage.getRecentSyncStats(),
         storage.getSetting("boulevard_sync_frequency_minutes"),
+        storage.getSetting("sync_operating_start_hour"),
+        storage.getSetting("sync_operating_end_hour"),
       ]);
+      const syncing = await shouldSync();
       res.json({
         lastSyncAt: lastSync?.completedAt || null,
         lastSyncStatus: lastSync?.status || null,
         totalImportedRecently: stats.totalImported,
         syncFrequencyMinutes: parseInt(freqStr || "10"),
+        operatingStartHour: parseInt(startStr || "7"),
+        operatingEndHour: parseInt(endStr || "21"),
+        currentlySyncing: syncing,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
