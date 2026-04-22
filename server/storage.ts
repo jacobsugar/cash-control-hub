@@ -284,6 +284,27 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(estheticians).orderBy(estheticians.name);
   }
 
+  async getEstheticiansWithLocations() {
+    const allEsth = await db.select().from(estheticians).orderBy(estheticians.name);
+    const allAssignments = await db
+      .select({
+        estheticianId: estheticianLocations.estheticianId,
+        locationId: estheticianLocations.locationId,
+        locationName: locations.name,
+        marketName: markets.name,
+      })
+      .from(estheticianLocations)
+      .innerJoin(locations, eq(estheticianLocations.locationId, locations.id))
+      .innerJoin(markets, eq(locations.marketId, markets.id));
+
+    return allEsth.map(e => ({
+      ...e,
+      locations: allAssignments
+        .filter(a => a.estheticianId === e.id)
+        .map(a => ({ locationId: a.locationId, locationName: a.locationName, marketName: a.marketName })),
+    }));
+  }
+
   async getEsthetician(id: number) {
     const [esth] = await db.select().from(estheticians).where(eq(estheticians.id, id));
     return esth;

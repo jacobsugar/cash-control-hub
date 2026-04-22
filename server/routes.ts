@@ -258,9 +258,11 @@ async function syncStaffFromBoulevard() {
   // Fetch all staff with their location assignments in one pass
   const allStaff = await boulevard.fetchAllStaffWithLocations();
 
-  // Filter to only staff assigned to our mapped locations
+  // Filter to only active estheticians assigned to our mapped locations
   const relevantStaff = allStaff.filter(s =>
-    s.active && s.locations.some(loc => blvdLocationIds.has(loc.id))
+    s.active &&
+    s.role?.name === "Aesthetician" &&
+    s.locations.some(loc => blvdLocationIds.has(loc.id))
   );
 
   const allSeenStaffIds: string[] = [];
@@ -772,6 +774,16 @@ export async function registerRoutes(
   });
 
   // Estheticians
+  // Estheticians with location assignments (admin view)
+  app.get("/api/admin/estheticians-with-locations", requireAdmin, async (_req, res) => {
+    try {
+      const data = await storage.getEstheticiansWithLocations();
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/estheticians", requireAdmin, async (req, res) => {
     try {
       const esth = await storage.createEsthetician(req.body);

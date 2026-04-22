@@ -285,6 +285,7 @@ async function resolveStaffForOrders(
  */
 export interface BoulevardStaffWithLocations extends BoulevardStaff {
   locations: { id: string; name: string }[];
+  role: { name: string } | null;
   active: boolean;
 }
 
@@ -303,6 +304,7 @@ export async function fetchAllStaffWithLocations(): Promise<BoulevardStaffWithLo
           edges {
             node {
               id firstName lastName displayName active
+              role { name }
               locations { id name }
             }
           }
