@@ -34,6 +34,7 @@ export default function EstheticiansPage() {
   const [name, setName] = useState("");
   const [search, setSearch] = useState("");
   const [marketFilter, setMarketFilter] = useState("all");
+  const [showInactive, setShowInactive] = useState(false);
 
   const { data: estheticians, isLoading } = useQuery<EstheticianWithLocations[]>({
     queryKey: ["/api/admin/estheticians-with-locations"],
@@ -107,6 +108,7 @@ export default function EstheticiansPage() {
   const filtered = useMemo(() => {
     if (!estheticians) return [];
     return estheticians.filter(e => {
+      if (!showInactive && !e.active) return false;
       if (search) {
         const q = search.toLowerCase();
         if (!e.name.toLowerCase().includes(q)) return false;
@@ -217,6 +219,10 @@ export default function EstheticiansPage() {
             ))}
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-2">
+          <Switch id="show-inactive" checked={showInactive} onCheckedChange={setShowInactive} />
+          <Label htmlFor="show-inactive" className="text-sm">Show inactive</Label>
+        </div>
       </div>
 
       {isLoading ? (
