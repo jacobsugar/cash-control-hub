@@ -2,7 +2,7 @@ import { eq, desc, and, gte, sql, inArray, ne, notInArray, lt } from "drizzle-or
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import {
-  markets, locations, containers, estheticians, shiftCounts, receipts,
+  markets, locations, containers, estheticians, estheticianLocations, shiftCounts, receipts,
   boulevardTransactions, alerts, cashCollections, adminUsers, alertRecipients, appSettings,
   boulevardSyncHistory,
   type InsertMarket, type InsertLocation, type InsertContainer, type InsertEsthetician,
@@ -44,8 +44,13 @@ export interface IStorage {
   // Estheticians
   getEstheticians(): Promise<Esthetician[]>;
   getEsthetician(id: number): Promise<Esthetician | undefined>;
+  getEstheticianByBoulevardId(boulevardStaffId: string): Promise<Esthetician | undefined>;
+  getEstheticiansByLocation(locationId: number): Promise<Esthetician[]>;
   createEsthetician(data: InsertEsthetician): Promise<Esthetician>;
   updateEsthetician(id: number, data: Partial<InsertEsthetician>): Promise<void>;
+  upsertEstheticianFromBoulevard(data: { name: string; boulevardStaffId: string }): Promise<Esthetician>;
+  setEstheticianLocations(estheticianId: number, locationIds: number[]): Promise<void>;
+  deactivateEstheticiansNotIn(boulevardStaffIds: string[]): Promise<number>;
   deleteEsthetician(id: number): Promise<void>;
 
   // Shift Counts
@@ -284,6 +289,24 @@ export class DatabaseStorage implements IStorage {
     return esth;
   }
 
+  async getEstheticianByBoulevardId(boulevardStaffId: string) {
+    const [esth] = await db.select().from(estheticians).where(eq(estheticians.boulevardStaffId, boulevardStaffId));
+    return esth;
+  }
+
+  async getEstheticiansByLocation(locationId: number) {
+    const result = await db
+      .select({ esthetician: estheticians })
+      .from(estheticianLocations)
+      .innerJoin(estheticians, eq(estheticianLocations.estheticianId, estheticians.id))
+      .where(and(
+        eq(estheticianLocations.locationId, locationId),
+        eq(estheticians.active, true)
+      ))
+      .orderBy(estheticians.name);
+    return result.map(r => r.esthetician);
+  }
+
   async createEsthetician(data: InsertEsthetician) {
     const [esth] = await db.insert(estheticians).values(data).returning();
     return esth;
@@ -291,6 +314,74 @@ export class DatabaseStorage implements IStorage {
 
   async updateEsthetician(id: number, data: Partial<InsertEsthetician>) {
     await db.update(estheticians).set(data).where(eq(estheticians.id, id));
+  }
+
+  async upsertEstheticianFromBoulevard(data: { name: string; boulevardStaffId: string }) {
+    // Check if already linked by Boulevard ID
+    let esth = await this.getEstheticianByBoulevardId(data.boulevardStaffId);
+    if (esth) {
+      // Update name if changed
+      if (esth.name !== data.name || !esth.active) {
+        await db.update(estheticians).set({
+          name: data.name,
+          active: true,
+          lastSyncedAt: new Date(),
+        } as any).where(eq(estheticians.id, esth.id));
+      } else {
+        await db.update(estheticians).set({
+          lastSyncedAt: new Date(),
+        } as any).where(eq(estheticians.id, esth.id));
+      }
+      return { ...esth, name: data.name, active: true };
+    }
+
+    // Try to match by name (for existing manually-added estheticians)
+    const [nameMatch] = await db.select().from(estheticians)
+      .where(and(
+        eq(estheticians.name, data.name),
+        sql`${estheticians.boulevardStaffId} IS NULL`
+      ));
+    if (nameMatch) {
+      await db.update(estheticians).set({
+        boulevardStaffId: data.boulevardStaffId,
+        active: true,
+        lastSyncedAt: new Date(),
+      } as any).where(eq(estheticians.id, nameMatch.id));
+      return { ...nameMatch, boulevardStaffId: data.boulevardStaffId, active: true };
+    }
+
+    // Create new
+    const [created] = await db.insert(estheticians).values({
+      name: data.name,
+      boulevardStaffId: data.boulevardStaffId,
+      active: true,
+      lastSyncedAt: new Date(),
+    } as any).returning();
+    return created;
+  }
+
+  async setEstheticianLocations(estheticianId: number, locationIds: number[]) {
+    // Remove existing assignments
+    await db.delete(estheticianLocations).where(eq(estheticianLocations.estheticianId, estheticianId));
+    // Add new assignments
+    if (locationIds.length > 0) {
+      await db.insert(estheticianLocations).values(
+        locationIds.map(locationId => ({ estheticianId, locationId } as any))
+      );
+    }
+  }
+
+  async deactivateEstheticiansNotIn(boulevardStaffIds: string[]) {
+    if (boulevardStaffIds.length === 0) return 0;
+    // Deactivate estheticians that have a boulevardStaffId but are not in the list
+    const result = await db.update(estheticians).set({ active: false })
+      .where(and(
+        sql`${estheticians.boulevardStaffId} IS NOT NULL`,
+        boulevardStaffIds.length > 0
+          ? sql`${estheticians.boulevardStaffId} NOT IN (${sql.join(boulevardStaffIds.map(id => sql`${id}`), sql`, `)})`
+          : sql`TRUE`
+      ));
+    return 0; // Drizzle doesn't return affected count easily
   }
 
   async deleteEsthetician(id: number) {

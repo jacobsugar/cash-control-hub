@@ -250,6 +250,50 @@ async function syncAllBoulevardLocations(syncType: "auto" | "manual" = "auto") {
   return { totalImported, locations: results };
 }
 
+async function syncStaffFromBoulevard() {
+  const mappedLocations = await storage.getBoulevardMappedLocations();
+  const allSeenStaffIds: string[] = [];
+  const staffLocationMap = new Map<string, number[]>(); // boulevardStaffId -> locationIds[]
+  let created = 0;
+  let updated = 0;
+
+  for (const loc of mappedLocations) {
+    if (!loc.boulevardLocationId) continue;
+    try {
+      const staff = await boulevard.fetchStaffForLocation(loc.boulevardLocationId);
+      for (const s of staff) {
+        const name = `${s.firstName} ${s.lastName}`.trim() || s.displayName;
+        const esth = await storage.upsertEstheticianFromBoulevard({
+          name,
+          boulevardStaffId: s.id,
+        });
+        allSeenStaffIds.push(s.id);
+
+        // Track location assignments
+        const existing = staffLocationMap.get(s.id) || [];
+        existing.push(loc.id);
+        staffLocationMap.set(s.id, existing);
+      }
+    } catch (err: any) {
+      console.error(`Staff sync failed for ${loc.name}:`, err.message);
+    }
+  }
+
+  // Set location assignments
+  const staffEntries = Array.from(staffLocationMap.entries());
+  for (const [staffId, locationIds] of staffEntries) {
+    const esth = await storage.getEstheticianByBoulevardId(staffId);
+    if (esth) {
+      await storage.setEstheticianLocations(esth.id, locationIds);
+    }
+  }
+
+  // Deactivate staff no longer in Boulevard
+  await storage.deactivateEstheticiansNotIn(allSeenStaffIds);
+
+  return { synced: allSeenStaffIds.length, locations: mappedLocations.length };
+}
+
 let boulevardSyncInterval: ReturnType<typeof setInterval> | null = null;
 async function startBoulevardAutoSync() {
   if (boulevardSyncInterval) clearInterval(boulevardSyncInterval);
@@ -263,6 +307,8 @@ async function startBoulevardAutoSync() {
       if (result.totalImported > 0) {
         console.log(`Boulevard auto-sync: imported ${result.totalImported} transactions`);
       }
+      // Also sync staff
+      await syncStaffFromBoulevard();
     } catch (err) {
       console.error("Boulevard auto-sync error:", err);
     }
@@ -423,11 +469,23 @@ export async function registerRoutes(
     }
   });
 
-  // Estheticians list
-  app.get("/api/estheticians", async (_req, res) => {
+  // Estheticians list (optionally filtered by location)
+  app.get("/api/estheticians", async (req, res) => {
     try {
-      const data = await storage.getEstheticians();
-      res.json(data);
+      const locationId = req.query.locationId ? parseInt(req.query.locationId as string) : null;
+      if (locationId) {
+        const data = await storage.getEstheticiansByLocation(locationId);
+        // Fall back to all active if no location assignments exist
+        if (data.length === 0) {
+          const all = await storage.getEstheticians();
+          res.json(all.filter((e: any) => e.active));
+        } else {
+          res.json(data);
+        }
+      } else {
+        const data = await storage.getEstheticians();
+        res.json(data);
+      }
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -974,6 +1032,19 @@ export async function registerRoutes(
       const limit = parseInt(req.query.limit as string) || 50;
       const history = await storage.getSyncHistory(limit);
       res.json(history);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Staff sync from Boulevard
+  app.post("/api/admin/boulevard/sync-staff", requireAdmin, async (_req, res) => {
+    try {
+      if (!boulevard.isConfigured()) {
+        return res.status(400).json({ message: "Boulevard API not configured" });
+      }
+      const result = await syncStaffFromBoulevard();
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

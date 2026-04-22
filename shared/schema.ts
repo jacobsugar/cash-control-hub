@@ -44,6 +44,15 @@ export const estheticians = pgTable("estheticians", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   name: text("name").notNull(),
   active: boolean("active").default(true).notNull(),
+  boulevardStaffId: text("boulevard_staff_id").unique(),
+  lastSyncedAt: timestamp("last_synced_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const estheticianLocations = pgTable("esthetician_locations", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  estheticianId: integer("esthetician_id").notNull().references(() => estheticians.id),
+  locationId: integer("location_id").notNull().references(() => locations.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

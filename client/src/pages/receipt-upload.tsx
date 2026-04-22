@@ -42,8 +42,11 @@ export default function ReceiptUploadPage() {
   const [ocrApplied, setOcrApplied] = useState(false);
   const ocrRequestIdRef = useRef(0);
 
+  const esthQueryKey = selectedLocation
+    ? `/api/estheticians?locationId=${selectedLocation}`
+    : "/api/estheticians";
   const { data: estheticians, isLoading: loadingEsth } = useQuery<Esthetician[]>({
-    queryKey: ["/api/estheticians"],
+    queryKey: [esthQueryKey],
   });
 
   const { data: locations, isLoading: loadingLoc } = useQuery<(Location & { marketName: string })[]>({

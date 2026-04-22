@@ -93,6 +93,13 @@ export interface BoulevardLocation {
   address?: { city: string; state: string };
 }
 
+export interface BoulevardStaff {
+  id: string;
+  firstName: string;
+  lastName: string;
+  displayName: string;
+}
+
 export interface BoulevardCashOrder {
   orderId: string;
   orderNumber: string;
@@ -276,6 +283,70 @@ async function resolveStaffForOrders(
 /**
  * Check if Boulevard API credentials are configured
  */
+/**
+ * Fetch staff members for a specific Boulevard location
+ */
+export async function fetchStaffForLocation(locationId: string): Promise<BoulevardStaff[]> {
+  const staff: BoulevardStaff[] = [];
+  let cursor: string | null = null;
+
+  for (let page = 0; page < 20; page++) {
+    const data: any = await graphql(
+      `query($l: ID!, $after: String) {
+        staff(first: 50, locationId: $l, after: $after) {
+          edges { node { id firstName lastName displayName } }
+          pageInfo { hasNextPage endCursor }
+        }
+      }`,
+      { l: locationId, after: cursor }
+    );
+
+    const edges = data.staff?.edges || [];
+    if (edges.length === 0) break;
+
+    for (const edge of edges) {
+      staff.push(edge.node);
+    }
+
+    if (!data.staff?.pageInfo?.hasNextPage) break;
+    cursor = data.staff.pageInfo.endCursor;
+  }
+
+  return staff;
+}
+
+/**
+ * Fetch all staff across all locations
+ */
+export async function fetchAllStaff(): Promise<BoulevardStaff[]> {
+  const staff: BoulevardStaff[] = [];
+  let cursor: string | null = null;
+
+  for (let page = 0; page < 20; page++) {
+    const data: any = await graphql(
+      `query($after: String) {
+        staff(first: 50, after: $after) {
+          edges { node { id firstName lastName displayName } }
+          pageInfo { hasNextPage endCursor }
+        }
+      }`,
+      { after: cursor }
+    );
+
+    const edges = data.staff?.edges || [];
+    if (edges.length === 0) break;
+
+    for (const edge of edges) {
+      staff.push(edge.node);
+    }
+
+    if (!data.staff?.pageInfo?.hasNextPage) break;
+    cursor = data.staff.pageInfo.endCursor;
+  }
+
+  return staff;
+}
+
 export function isConfigured(): boolean {
   return !!(
     process.env.BOULEVARD_BUSINESS_ID &&

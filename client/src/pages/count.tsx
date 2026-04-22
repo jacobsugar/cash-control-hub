@@ -31,8 +31,11 @@ export default function CountPage() {
   const [priorAmount, setPriorAmount] = useState<string | null>(null);
   const [expectedAmount, setExpectedAmount] = useState<string | null>(null);
 
+  const esthQueryKey = selectedLocation
+    ? `/api/estheticians?locationId=${selectedLocation}`
+    : "/api/estheticians";
   const { data: estheticians, isLoading: loadingEsth } = useQuery<Esthetician[]>({
-    queryKey: ["/api/estheticians"],
+    queryKey: [esthQueryKey],
   });
 
   const { data: locations, isLoading: loadingLoc } = useQuery<(Location & { marketName: string })[]>({
