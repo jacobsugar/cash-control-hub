@@ -8,7 +8,7 @@ import {
   Building2,
   Users,
   Phone,
-  FileSpreadsheet,
+  RefreshCw,
   Wallet,
   Shield,
   Settings,
@@ -37,7 +37,7 @@ const mainItems = [
 ];
 
 const dataItems = [
-  { title: "Boulevard Import", url: "/admin/boulevard", icon: FileSpreadsheet },
+  { title: "Boulevard Sync", url: "/admin/boulevard", icon: RefreshCw },
 ];
 
 const settingsItems = [
