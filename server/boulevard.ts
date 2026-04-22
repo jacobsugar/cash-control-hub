@@ -283,50 +283,29 @@ async function resolveStaffForOrders(
 /**
  * Check if Boulevard API credentials are configured
  */
-/**
- * Fetch staff members for a specific Boulevard location
- */
-export async function fetchStaffForLocation(locationId: string): Promise<BoulevardStaff[]> {
-  const staff: BoulevardStaff[] = [];
-  let cursor: string | null = null;
-
-  for (let page = 0; page < 20; page++) {
-    const data: any = await graphql(
-      `query($l: ID!, $after: String) {
-        staff(first: 50, locationId: $l, after: $after) {
-          edges { node { id firstName lastName displayName } }
-          pageInfo { hasNextPage endCursor }
-        }
-      }`,
-      { l: locationId, after: cursor }
-    );
-
-    const edges = data.staff?.edges || [];
-    if (edges.length === 0) break;
-
-    for (const edge of edges) {
-      staff.push(edge.node);
-    }
-
-    if (!data.staff?.pageInfo?.hasNextPage) break;
-    cursor = data.staff.pageInfo.endCursor;
-  }
-
-  return staff;
+export interface BoulevardStaffWithLocations extends BoulevardStaff {
+  locations: { id: string; name: string }[];
+  active: boolean;
 }
 
 /**
- * Fetch all staff across all locations
+ * Fetch all staff with their location assignments.
+ * Staff query doesn't support locationId filtering — we fetch all and filter locally.
  */
-export async function fetchAllStaff(): Promise<BoulevardStaff[]> {
-  const staff: BoulevardStaff[] = [];
+export async function fetchAllStaffWithLocations(): Promise<BoulevardStaffWithLocations[]> {
+  const staff: BoulevardStaffWithLocations[] = [];
   let cursor: string | null = null;
 
-  for (let page = 0; page < 20; page++) {
+  for (let page = 0; page < 100; page++) {
     const data: any = await graphql(
       `query($after: String) {
         staff(first: 50, after: $after) {
-          edges { node { id firstName lastName displayName } }
+          edges {
+            node {
+              id firstName lastName displayName active
+              locations { id name }
+            }
+          }
           pageInfo { hasNextPage endCursor }
         }
       }`,

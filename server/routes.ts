@@ -252,30 +252,35 @@ async function syncAllBoulevardLocations(syncType: "auto" | "manual" = "auto") {
 
 async function syncStaffFromBoulevard() {
   const mappedLocations = await storage.getBoulevardMappedLocations();
+  const blvdLocationIds = new Set(mappedLocations.map(l => l.boulevardLocationId).filter(Boolean));
+
+  // Fetch all staff with their location assignments in one pass
+  const allStaff = await boulevard.fetchAllStaffWithLocations();
+
+  // Filter to only staff assigned to our mapped locations
+  const relevantStaff = allStaff.filter(s =>
+    s.active && s.locations.some(loc => blvdLocationIds.has(loc.id))
+  );
+
   const allSeenStaffIds: string[] = [];
-  const staffLocationMap = new Map<string, number[]>(); // boulevardStaffId -> locationIds[]
-  let created = 0;
-  let updated = 0;
+  const staffLocationMap = new Map<string, number[]>();
 
-  for (const loc of mappedLocations) {
-    if (!loc.boulevardLocationId) continue;
-    try {
-      const staff = await boulevard.fetchStaffForLocation(loc.boulevardLocationId);
-      for (const s of staff) {
-        const name = `${s.firstName} ${s.lastName}`.trim() || s.displayName;
-        const esth = await storage.upsertEstheticianFromBoulevard({
-          name,
-          boulevardStaffId: s.id,
-        });
-        allSeenStaffIds.push(s.id);
+  for (const s of relevantStaff) {
+    const name = `${s.firstName} ${s.lastName}`.trim() || s.displayName;
+    await storage.upsertEstheticianFromBoulevard({
+      name,
+      boulevardStaffId: s.id,
+    });
+    allSeenStaffIds.push(s.id);
 
-        // Track location assignments
-        const existing = staffLocationMap.get(s.id) || [];
-        existing.push(loc.id);
-        staffLocationMap.set(s.id, existing);
-      }
-    } catch (err: any) {
-      console.error(`Staff sync failed for ${loc.name}:`, err.message);
+    // Map Boulevard location IDs to app location IDs
+    const appLocationIds: number[] = [];
+    for (const blvdLoc of s.locations) {
+      const appLoc = mappedLocations.find(l => l.boulevardLocationId === blvdLoc.id);
+      if (appLoc) appLocationIds.push(appLoc.id);
+    }
+    if (appLocationIds.length > 0) {
+      staffLocationMap.set(s.id, appLocationIds);
     }
   }
 
@@ -288,8 +293,10 @@ async function syncStaffFromBoulevard() {
     }
   }
 
-  // Deactivate staff no longer in Boulevard
-  await storage.deactivateEstheticiansNotIn(allSeenStaffIds);
+  // Deactivate staff no longer in relevant locations
+  if (allSeenStaffIds.length > 0) {
+    await storage.deactivateEstheticiansNotIn(allSeenStaffIds);
+  }
 
   return { synced: allSeenStaffIds.length, locations: mappedLocations.length };
 }
