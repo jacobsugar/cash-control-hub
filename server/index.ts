@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { installLogCapture } from "./logBuffer";
+installLogCapture(); // Must be called before any other imports that use console
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";

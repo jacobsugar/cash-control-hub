@@ -12,6 +12,7 @@ import {
   Wallet,
   Shield,
   Settings,
+  Terminal,
 } from "lucide-react";
 import {
   Sidebar,
@@ -47,6 +48,7 @@ const settingsItems = [
   { title: "Alert Recipients", url: "/admin/recipients", icon: Phone },
   { title: "Admin Users", url: "/admin/users", icon: Shield },
   { title: "Settings", url: "/admin/settings", icon: Settings },
+  { title: "Server Logs", url: "/admin/logs", icon: Terminal },
 ];
 
 export function AppSidebar() {

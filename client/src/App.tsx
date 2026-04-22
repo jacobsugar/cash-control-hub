@@ -21,6 +21,7 @@ import EstheticiansPage from "@/pages/admin/estheticians";
 import RecipientsPage from "@/pages/admin/recipients";
 import AdminUsersPage from "@/pages/admin/admin-users";
 import SettingsPage from "@/pages/admin/settings";
+import LogsPage from "@/pages/admin/logs";
 import { useAdminAuth } from "@/hooks/use-admin-auth";
 import { Loader2 } from "lucide-react";
 
@@ -55,6 +56,7 @@ function AdminRouter() {
         <Route path="/admin/recipients" component={RecipientsPage} />
         <Route path="/admin/users" component={AdminUsersPage} />
         <Route path="/admin/settings" component={SettingsPage} />
+        <Route path="/admin/logs" component={LogsPage} />
         <Route component={NotFound} />
       </Switch>
     </AdminLayout>

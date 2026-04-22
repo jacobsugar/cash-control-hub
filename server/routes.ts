@@ -7,6 +7,7 @@ import fs from "fs";
 import session from "express-session";
 import OpenAI from "openai";
 import * as boulevard from "./boulevard";
+import { getRecentLogs } from "./logBuffer";
 
 // Singleton OpenAI client — reused across requests
 let openaiClient: OpenAI | null = null;
@@ -1229,6 +1230,20 @@ export async function registerRoutes(
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
+  });
+
+  // Admin logs endpoint — supports session auth or token auth
+  app.get("/api/admin/logs", async (req, res) => {
+    const token = req.query.token as string;
+    const logToken = process.env.LOG_ACCESS_TOKEN;
+
+    // Allow access via session (admin) or token
+    if (!req.session?.adminEmail && (!logToken || token !== logToken)) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const n = parseInt(req.query.n as string) || 200;
+    res.json(getRecentLogs(n));
   });
 
   return httpServer;
