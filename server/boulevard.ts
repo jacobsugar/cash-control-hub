@@ -151,6 +151,7 @@ export async function fetchCashOrdersForLocation(
             cursor
             node {
               id number closedAt
+              client { firstName lastName }
               summary { currentTotal }
               paymentGroups {
                 payments { __typename paidAmount }
@@ -206,6 +207,8 @@ export async function fetchCashOrdersForLocation(
       const staffMap = await resolveStaffForOrders(locationId, orderIds);
 
       for (const order of cashOrderNodes) {
+        const client = order.client;
+        const clientName = client ? `${client.firstName || ""} ${client.lastName || ""}`.trim() : null;
         cashOrders.push({
           orderId: order.id,
           orderNumber: order.number,
@@ -214,7 +217,7 @@ export async function fetchCashOrdersForLocation(
           cashAmount: order.cashAmount,
           totalAmount: order.totalAmount,
           operatorName: staffMap.get(order.id) || null,
-          clientName: null, // Could add client lookup if needed
+          clientName,
         });
       }
     }
@@ -227,8 +230,9 @@ export async function fetchCashOrdersForLocation(
 }
 
 /**
- * Resolve staff names for a set of order IDs by querying appointments.
- * Returns a map of orderId -> staff display name.
+ * Resolve staff names for a set of order IDs by looking up each order's
+ * line groups individually. We query lineGroups separately from paymentGroups
+ * because combining them causes a Boulevard server 500.
  */
 async function resolveStaffForOrders(
   locationId: string,
@@ -236,45 +240,41 @@ async function resolveStaffForOrders(
 ): Promise<Map<string, string>> {
   const staffMap = new Map<string, string>();
 
-  // Fetch recent appointments for the location and match by orderId
-  let cursor: string | null = null;
-  const orderIdSet = new Set(orderIds);
-
-  for (let page = 0; page < 20; page++) {
-    const data: any = await graphql(
-      `query($l: ID!, $after: String) {
-        appointments(first: 50, locationId: $l, after: $after) {
-          edges {
-            node {
-              orderId
-              appointmentServices {
-                staff { firstName lastName }
+  // Query each order individually for its service line staff
+  for (const orderId of orderIds) {
+    try {
+      const data: any = await graphql(
+        `query($id: ID!) {
+          order(id: $id) {
+            lineGroups {
+              lines {
+                ... on OrderServiceLine { initialStaffId name }
               }
             }
           }
-          pageInfo { hasNextPage endCursor }
-        }
-      }`,
-      { l: locationId, after: cursor }
-    );
+        }`,
+        { id: orderId }
+      );
 
-    const edges = data.appointments?.edges || [];
-    if (edges.length === 0) break;
-
-    for (const edge of edges) {
-      const appt = edge.node;
-      if (appt.orderId && orderIdSet.has(appt.orderId)) {
-        const staff = appt.appointmentServices?.[0]?.staff;
-        if (staff) {
-          staffMap.set(appt.orderId, `${staff.firstName} ${staff.lastName}`.trim());
+      const staffId = data.order?.lineGroups?.[0]?.lines?.[0]?.initialStaffId;
+      if (staffId) {
+        // Look up the staff member name
+        try {
+          const staffData: any = await graphql(
+            `query($id: ID!) { staffMember(id: $id) { firstName lastName } }`,
+            { id: staffId }
+          );
+          const s = staffData.staffMember;
+          if (s) {
+            staffMap.set(orderId, `${s.firstName} ${s.lastName}`.trim());
+          }
+        } catch {
+          // Staff lookup failed — skip
         }
-        orderIdSet.delete(appt.orderId);
       }
+    } catch {
+      // lineGroups query can 500 on some orders — skip silently
     }
-
-    // Stop if we've resolved all orders or no more pages
-    if (orderIdSet.size === 0 || !data.appointments?.pageInfo?.hasNextPage) break;
-    cursor = data.appointments.pageInfo.endCursor;
   }
 
   return staffMap;
