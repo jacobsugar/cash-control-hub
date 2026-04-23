@@ -132,10 +132,6 @@ export default function CountPage() {
   };
 
   const handleRecount = () => {
-    if (!discrepancyNote.trim()) {
-      toast({ title: "Note required", description: "Please explain why the count was wrong before recounting.", variant: "destructive" });
-      return;
-    }
     // Flag so global onSuccess doesn't navigate to done screen
     isRecountingRef.current = true;
     // Record the failed count attempt with an alert
@@ -145,7 +141,7 @@ export default function CountPage() {
       type: shiftType,
       countedAmount,
       expectedAmount,
-      discrepancyNote: `[RECOUNT] ${discrepancyNote}`,
+      discrepancyNote: `[RECOUNT] ${discrepancyNote || "First count mismatch — recounting"}`,
     }, {
       onSuccess: () => {
         // Reset for a new blind count
@@ -441,19 +437,9 @@ export default function CountPage() {
                             <div>
                               <p className="text-sm font-medium text-destructive">Discrepancy Detected</p>
                               <p className="text-xs text-muted-foreground mt-1">
-                                Your count doesn't match the expected amount. Please add a note and recount.
+                                Your count doesn't match the expected amount. Please recount the cash.
                               </p>
                             </div>
-                          </div>
-                          <div className="mt-3 space-y-2">
-                            <Label htmlFor="note" className="text-sm">Reason (required)</Label>
-                            <Textarea
-                              id="note"
-                              placeholder="Explain what may have been miscounted..."
-                              value={discrepancyNote}
-                              onChange={(e) => setDiscrepancyNote(e.target.value)}
-                              data-testid="input-discrepancy-note"
-                            />
                           </div>
                         </div>
                       </CardContent>
@@ -545,10 +531,10 @@ export default function CountPage() {
               <Button
                 variant="outline"
                 className="w-full"
-                disabled={!discrepancyNote.trim() || submitMutation.isPending}
+                disabled={submitMutation.isPending}
                 onClick={handleRecount}
               >
-                {submitMutation.isPending ? "Recording..." : "Record Miscount & Recount"}
+                {submitMutation.isPending ? "Recording..." : "Recount"}
               </Button>
             )}
           </div>
