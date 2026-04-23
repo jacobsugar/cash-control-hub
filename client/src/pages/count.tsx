@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -64,6 +64,8 @@ export default function CountPage() {
     enabled: !!selectedContainer && step === "count",
   });
 
+  const isRecountingRef = useRef(false);
+
   const submitMutation = useMutation({
     mutationFn: async (data: {
       containerId: number;
@@ -78,10 +80,15 @@ export default function CountPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/shift-counts"] });
-      setStep("done");
-      toast({ title: "Cash count submitted", description: "Your count has been recorded successfully." });
+      // Don't go to done screen if this was a recount submission
+      if (!isRecountingRef.current) {
+        setStep("done");
+        toast({ title: "Cash count submitted", description: "Your count has been recorded successfully." });
+      }
+      isRecountingRef.current = false;
     },
     onError: (err: Error) => {
+      isRecountingRef.current = false;
       toast({ title: "Error", description: err.message, variant: "destructive" });
     },
   });
@@ -129,6 +136,8 @@ export default function CountPage() {
       toast({ title: "Note required", description: "Please explain why the count was wrong before recounting.", variant: "destructive" });
       return;
     }
+    // Flag so global onSuccess doesn't navigate to done screen
+    isRecountingRef.current = true;
     // Record the failed count attempt with an alert
     submitMutation.mutate({
       containerId: parseInt(selectedContainer),
