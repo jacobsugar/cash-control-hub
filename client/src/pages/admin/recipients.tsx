@@ -10,14 +10,24 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Phone, Plus, Trash2 } from "lucide-react";
+import { Phone, Plus, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import type { AlertRecipient } from "@shared/schema";
+
+const ALERT_TYPES = [
+  { key: "notifyStartMismatch", label: "Start Mismatch" },
+  { key: "notifyEndMismatch", label: "End Mismatch" },
+  { key: "notifyMissingEndShift", label: "Missing End Shift" },
+  { key: "notifyMissingReceipt", label: "Missing Receipt" },
+  { key: "notifyReceiptSubmitted", label: "Receipt Submitted" },
+  { key: "notifyCollectionMismatch", label: "Collection Mismatch" },
+] as const;
 
 export default function RecipientsPage() {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const { data: recipients, isLoading } = useQuery<AlertRecipient[]>({
     queryKey: ["/api/admin/alert-recipients"],
@@ -40,9 +50,9 @@ export default function RecipientsPage() {
     },
   });
 
-  const toggleMutation = useMutation({
-    mutationFn: async ({ id, active }: { id: number; active: boolean }) => {
-      await apiRequest("PATCH", `/api/admin/alert-recipients/${id}`, { active });
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: any }) => {
+      await apiRequest("PATCH", `/api/admin/alert-recipients/${id}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/alert-recipients"] });
@@ -63,12 +73,12 @@ export default function RecipientsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold" data-testid="text-recipients-title">Alert Recipients</h1>
-          <p className="text-muted-foreground">Phone numbers that receive SMS alerts</p>
+          <h1 className="text-2xl font-bold">Alert Recipients</h1>
+          <p className="text-muted-foreground">Manage who receives SMS alerts and which types they get</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button data-testid="button-add-recipient">
+            <Button>
               <Plus className="mr-2 h-4 w-4" />
               Add Recipient
             </Button>
@@ -84,7 +94,6 @@ export default function RecipientsPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Recipient name"
-                  data-testid="input-recipient-name"
                 />
               </div>
               <div className="space-y-2">
@@ -93,14 +102,12 @@ export default function RecipientsPage() {
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="+1234567890"
-                  data-testid="input-recipient-phone"
                 />
               </div>
               <Button
                 className="w-full"
                 disabled={!phone.trim() || createMutation.isPending}
                 onClick={() => createMutation.mutate({ phoneNumber: phone.trim(), name: name.trim() })}
-                data-testid="button-submit-recipient"
               >
                 {createMutation.isPending ? "Adding..." : "Add Recipient"}
               </Button>
@@ -124,36 +131,58 @@ export default function RecipientsPage() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {recipients.map((r) => (
+          {recipients.map((r: any) => (
             <Card key={r.id}>
-              <CardContent className="py-3 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10">
-                    <Phone className="h-4 w-4 text-primary" />
+              <CardContent className="py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10">
+                      <Phone className="h-4 w-4 text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-medium">{r.name || "Unnamed"}</p>
+                      <p className="text-sm text-muted-foreground font-mono">{r.phoneNumber}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-medium">{r.name || "Unnamed"}</p>
-                    <p className="text-sm text-muted-foreground font-mono" data-testid={`text-phone-${r.id}`}>{r.phoneNumber}</p>
+                  <div className="flex items-center gap-2">
+                    {!r.active && <Badge variant="secondary">Inactive</Badge>}
+                    <Switch
+                      checked={r.active}
+                      onCheckedChange={(checked) => updateMutation.mutate({ id: r.id, data: { active: checked } })}
+                    />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                    >
+                      {expandedId === r.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => { if (confirm("Remove this recipient?")) deleteMutation.mutate(r.id); }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {!r.active && <Badge variant="secondary">Inactive</Badge>}
-                  <Switch
-                    checked={r.active}
-                    onCheckedChange={(checked) => toggleMutation.mutate({ id: r.id, active: checked })}
-                    data-testid={`switch-recipient-${r.id}`}
-                  />
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => {
-                      if (confirm("Remove this recipient?")) deleteMutation.mutate(r.id);
-                    }}
-                    data-testid={`button-delete-recipient-${r.id}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+
+                {expandedId === r.id && (
+                  <div className="mt-3 ml-12 space-y-2 border-t pt-3">
+                    <p className="text-xs font-medium text-muted-foreground mb-2">Alert Types</p>
+                    {ALERT_TYPES.map(({ key, label }) => (
+                      <div key={key} className="flex items-center justify-between py-1">
+                        <Label className="text-sm font-normal">{label}</Label>
+                        <Switch
+                          checked={r[key] !== false}
+                          onCheckedChange={(checked) =>
+                            updateMutation.mutate({ id: r.id, data: { [key]: checked } })
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}

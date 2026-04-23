@@ -80,9 +80,21 @@ async function sendAlertSms(alertData: {
       return;
     }
 
-    const activeRecipients = recipients.filter((r) => r.active);
+    // Filter recipients by active status AND alert type preference
+    const alertTypeToField: Record<string, string> = {
+      start_mismatch: "notifyStartMismatch",
+      end_mismatch: "notifyEndMismatch",
+      missing_end_shift: "notifyMissingEndShift",
+      missing_receipt: "notifyMissingReceipt",
+      receipt_submitted: "notifyReceiptSubmitted",
+      collection_mismatch: "notifyCollectionMismatch",
+    };
+    const fieldName = alertTypeToField[alertData.type] || null;
+    const activeRecipients = recipients.filter((r: any) =>
+      r.active && (fieldName ? r[fieldName] !== false : true)
+    );
     if (activeRecipients.length === 0) {
-      console.log("SMS not sent: No active alert recipients");
+      console.log(`SMS not sent: No active recipients for alert type ${alertData.type}`);
       return;
     }
 
@@ -634,49 +646,77 @@ export async function registerRoutes(
     }
   });
 
-  // Upload receipt
+  // Upload receipt (file is optional — "I don't have a receipt" triggers missing_receipt alert)
   app.post("/api/receipts", upload.single("file"), async (req, res) => {
     try {
-      if (!req.file) return res.status(400).send("No file uploaded");
+      const { containerId, estheticianId, amount, note, shiftCountId, noReceipt } = req.body;
+      const hasFile = !!req.file;
+      const missingReceipt = noReceipt === "true" || noReceipt === true;
 
-      const { containerId, estheticianId, amount, note, shiftCountId } = req.body;
+      if (!hasFile && !missingReceipt) {
+        return res.status(400).send("No file uploaded");
+      }
 
       const receipt = await storage.createReceipt({
         containerId: parseInt(containerId),
         estheticianId: parseInt(estheticianId),
         amount,
-        filePath: req.file.path,
-        fileName: req.file.originalname,
+        filePath: hasFile ? req.file!.path : null,
+        fileName: hasFile ? req.file!.originalname : null,
+        hasReceipt: hasFile,
         note: note || null,
         shiftCountId: shiftCountId ? parseInt(shiftCountId) : null,
       });
 
-      // Create alert for receipt submission
       const [container, esth] = await Promise.all([
         storage.getContainer(parseInt(containerId)),
         storage.getEsthetician(parseInt(estheticianId)),
       ]);
       const loc = container ? await storage.getLocation(container.locationId) : undefined;
 
-      await storage.createAlert({
-        type: "receipt_submitted",
-        staffName: esth?.name || null,
-        marketName: loc?.marketName || null,
-        locationName: loc?.name || null,
-        containerName: container?.name || null,
-        actualAmount: amount,
-        note: note || `Receipt: ${req.file.originalname}`,
-        receiptId: receipt.id,
-      });
+      if (missingReceipt) {
+        // Missing receipt alert
+        await storage.createAlert({
+          type: "missing_receipt",
+          staffName: esth?.name || null,
+          marketName: loc?.marketName || null,
+          locationName: loc?.name || null,
+          containerName: container?.name || null,
+          actualAmount: amount,
+          note: note || "Cash spent without receipt",
+          receiptId: receipt.id,
+        });
 
-      sendAlertSms({
-        type: "receipt_submitted",
-        staffName: esth?.name || null,
-        locationName: loc?.name || null,
-        containerName: container?.name || null,
-        actualAmount: amount,
-        note: note || `Receipt: ${req.file!.originalname}`,
-      });
+        sendAlertSms({
+          type: "missing_receipt",
+          staffName: esth?.name || null,
+          locationName: loc?.name || null,
+          containerName: container?.name || null,
+          actualAmount: amount,
+          note: note || "Cash spent without receipt",
+        });
+      } else {
+        // Normal receipt submission alert
+        await storage.createAlert({
+          type: "receipt_submitted",
+          staffName: esth?.name || null,
+          marketName: loc?.marketName || null,
+          locationName: loc?.name || null,
+          containerName: container?.name || null,
+          actualAmount: amount,
+          note: note || `Receipt: ${req.file!.originalname}`,
+          receiptId: receipt.id,
+        });
+
+        sendAlertSms({
+          type: "receipt_submitted",
+          staffName: esth?.name || null,
+          locationName: loc?.name || null,
+          containerName: container?.name || null,
+          actualAmount: amount,
+          note: note || `Receipt: ${req.file!.originalname}`,
+        });
+      }
 
       res.json(receipt);
     } catch (err: any) {

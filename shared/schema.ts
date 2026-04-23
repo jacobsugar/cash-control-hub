@@ -73,8 +73,9 @@ export const receipts = pgTable("receipts", {
   shiftCountId: integer("shift_count_id").references(() => shiftCounts.id),
   estheticianId: integer("esthetician_id").notNull().references(() => estheticians.id),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
-  filePath: text("file_path").notNull(),
-  fileName: text("file_name").notNull(),
+  filePath: text("file_path"),
+  fileName: text("file_name"),
+  hasReceipt: boolean("has_receipt").default(true).notNull(),
   note: text("note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -131,6 +132,13 @@ export const alertRecipients = pgTable("alert_recipients", {
   phoneNumber: text("phone_number").notNull(),
   name: text("name"),
   active: boolean("active").default(true).notNull(),
+  // Per-alert-type notification toggles (all default to true)
+  notifyStartMismatch: boolean("notify_start_mismatch").default(true).notNull(),
+  notifyEndMismatch: boolean("notify_end_mismatch").default(true).notNull(),
+  notifyMissingEndShift: boolean("notify_missing_end_shift").default(true).notNull(),
+  notifyMissingReceipt: boolean("notify_missing_receipt").default(true).notNull(),
+  notifyReceiptSubmitted: boolean("notify_receipt_submitted").default(true).notNull(),
+  notifyCollectionMismatch: boolean("notify_collection_mismatch").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Upload,
   DollarSign,
@@ -19,6 +20,7 @@ import {
   ArrowLeft,
   Loader2,
   ScanLine,
+  AlertTriangle,
 } from "lucide-react";
 import helloSugarLogo from "@assets/Logo_for_Swag_(1)_1770876580780.png";
 import type { Esthetician, Location, Container } from "@shared/schema";
@@ -37,6 +39,7 @@ export default function ReceiptUploadPage() {
   const [note, setNote] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [noReceipt, setNoReceipt] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [ocrApplied, setOcrApplied] = useState(false);
@@ -77,13 +80,14 @@ export default function ReceiptUploadPage() {
 
   const uploadMutation = useMutation({
     mutationFn: async () => {
-      if (!file) throw new Error("No file selected");
+      if (!file && !noReceipt) throw new Error("No file selected");
       const formData = new FormData();
-      formData.append("file", file);
+      if (file) formData.append("file", file);
       formData.append("containerId", selectedContainer);
       formData.append("estheticianId", selectedEsthetician);
       formData.append("amount", amount);
       if (note) formData.append("note", note);
+      if (noReceipt) formData.append("noReceipt", "true");
       const res = await fetch("/api/receipts", {
         method: "POST",
         body: formData,
@@ -299,6 +303,30 @@ export default function ReceiptUploadPage() {
 
         <Card>
           <CardContent className="pt-6 space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Checkbox
+                id="no-receipt"
+                checked={noReceipt}
+                onCheckedChange={(checked) => {
+                  setNoReceipt(!!checked);
+                  if (checked) { setFile(null); setPreview(null); setOcrApplied(false); }
+                }}
+              />
+              <Label htmlFor="no-receipt" className="text-sm font-normal cursor-pointer">
+                I don't have a receipt
+              </Label>
+            </div>
+
+            {noReceipt && (
+              <div className="rounded-md bg-yellow-500/10 border border-yellow-500/20 p-3 flex items-start gap-2 mb-4">
+                <AlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5 shrink-0" />
+                <p className="text-xs text-yellow-700">
+                  A missing receipt alert will be sent to managers. Please enter the amount spent and explain in the note what the purchase was for.
+                </p>
+              </div>
+            )}
+
+            {!noReceipt && (
             <div className="space-y-2">
               <Label>Receipt Photo/File</Label>
               <input
@@ -352,10 +380,11 @@ export default function ReceiptUploadPage() {
                 </button>
               )}
             </div>
+            )}
 
             <div className="space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
-                <Label htmlFor="receipt-amount">Receipt Amount</Label>
+                <Label htmlFor="receipt-amount">{noReceipt ? "Amount Spent" : "Receipt Amount"}</Label>
                 {isScanning && (
                   <span className="flex items-center gap-1 text-xs text-muted-foreground" data-testid="text-ocr-scanning">
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -389,7 +418,7 @@ export default function ReceiptUploadPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="receipt-note">Note (optional)</Label>
+              <Label htmlFor="receipt-note">{noReceipt ? "What was the purchase for? (required)" : "Note (optional)"}</Label>
               <Textarea
                 id="receipt-note"
                 placeholder="What was this purchase for?"
@@ -405,16 +434,17 @@ export default function ReceiptUploadPage() {
           className="w-full"
           size="lg"
           disabled={
-            !file ||
+            (!file && !noReceipt) ||
             !amount ||
             !selectedEsthetician ||
             !selectedContainer ||
-            uploadMutation.isPending
+            uploadMutation.isPending ||
+            (noReceipt && !note.trim())
           }
           onClick={() => uploadMutation.mutate()}
           data-testid="button-submit-receipt"
         >
-          {uploadMutation.isPending ? "Uploading..." : "Submit Receipt"}
+          {uploadMutation.isPending ? "Submitting..." : noReceipt ? "Report Cash Spent" : "Submit Receipt"}
         </Button>
       </main>
     </div>
