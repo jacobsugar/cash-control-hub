@@ -109,6 +109,7 @@ export default function CountPage() {
   };
 
   const [submitted, setSubmitted] = useState(false);
+  const [recounting, setRecounting] = useState(false);
 
   const hasMismatch =
     submitted &&
@@ -117,11 +118,36 @@ export default function CountPage() {
     parseFloat(countedAmount) !== parseFloat(expectedAmount);
 
   const handleSubmit = () => {
-    // Set expected amount from prior query before comparing
     if (priorQuery.data) {
       setExpectedAmount(priorQuery.data.expectedAmount);
     }
     setSubmitted(true);
+  };
+
+  const handleRecount = () => {
+    if (!discrepancyNote.trim()) {
+      toast({ title: "Note required", description: "Please explain why the count was wrong before recounting.", variant: "destructive" });
+      return;
+    }
+    // Record the failed count attempt with an alert
+    submitMutation.mutate({
+      containerId: parseInt(selectedContainer),
+      estheticianId: parseInt(selectedEsthetician),
+      type: shiftType,
+      countedAmount,
+      expectedAmount,
+      discrepancyNote: `[RECOUNT] ${discrepancyNote}`,
+    }, {
+      onSuccess: () => {
+        // Reset for a new blind count
+        setSubmitted(false);
+        setRecounting(true);
+        setCountedAmount("");
+        setExpectedAmount(null);
+        setDiscrepancyNote("");
+        toast({ title: "Miscount recorded", description: "Your first count was logged. Please recount the cash." });
+      },
+    });
   };
 
   const handleConfirmSubmit = () => {
@@ -135,7 +161,7 @@ export default function CountPage() {
       type: shiftType,
       countedAmount,
       expectedAmount,
-      discrepancyNote: hasMismatch ? discrepancyNote : null,
+      discrepancyNote: hasMismatch ? (recounting ? `[RECOUNT] ${discrepancyNote}` : discrepancyNote) : null,
     });
   };
 
@@ -457,16 +483,17 @@ export default function CountPage() {
               >
                 {submitMutation.isPending ? "Submitting..." : submitted ? "Confirm & Submit" : "Submit Count"}
               </Button>
-              {submitted && (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => { setSubmitted(false); setCountedAmount(""); setExpectedAmount(null); setDiscrepancyNote(""); }}
-                >
-                  Recount
-                </Button>
-              )}
             </div>
+            {submitted && hasMismatch && (
+              <Button
+                variant="outline"
+                className="w-full"
+                disabled={!discrepancyNote.trim() || submitMutation.isPending}
+                onClick={handleRecount}
+              >
+                {submitMutation.isPending ? "Recording..." : "Record Miscount & Recount"}
+              </Button>
+            )}
           </div>
         )}
       </main>
