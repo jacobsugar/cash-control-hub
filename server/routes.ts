@@ -187,6 +187,13 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   res.status(401).json({ message: "Unauthorized" });
 }
 
+function requireOwner(req: Request, res: Response, next: NextFunction) {
+  if (req.session?.adminEmail && req.session?.adminRole === "owner") {
+    return next();
+  }
+  res.status(403).json({ message: "Owner access required" });
+}
+
 async function syncBoulevardLocation(blvdLocationId: string, appLocationId: number, sinceDays: number) {
   const since = new Date();
   since.setDate(since.getDate() - sinceDays);
@@ -799,7 +806,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/markets/:id", requireAdmin, async (req, res) => {
+  app.delete("/api/markets/:id", requireAdmin, requireOwner, async (req, res) => {
     try {
       await storage.deleteMarket(parseInt(req.params.id));
       res.json({ success: true });
@@ -827,7 +834,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/locations/:id", requireAdmin, async (req, res) => {
+  app.delete("/api/locations/:id", requireAdmin, requireOwner, async (req, res) => {
     try {
       await storage.deleteLocation(parseInt(req.params.id));
       res.json({ success: true });
@@ -855,7 +862,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/containers/:id", requireAdmin, async (req, res) => {
+  app.delete("/api/containers/:id", requireAdmin, requireOwner, async (req, res) => {
     try {
       await storage.deleteContainer(parseInt(req.params.id));
       res.json({ success: true });
@@ -893,7 +900,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/estheticians/:id", requireAdmin, async (req, res) => {
+  app.delete("/api/estheticians/:id", requireAdmin, requireOwner, async (req, res) => {
     try {
       await storage.deleteEsthetician(parseInt(req.params.id));
       res.json({ success: true });
@@ -1261,7 +1268,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/users", requireAdmin, async (req, res) => {
+  app.post("/api/admin/users", requireAdmin, requireOwner, async (req, res) => {
     try {
       const user = await storage.createAdminUser(req.body);
       res.json(user);
@@ -1270,7 +1277,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
+  app.delete("/api/admin/users/:id", requireAdmin, requireOwner, async (req, res) => {
     try {
       await storage.deleteAdminUser(parseInt(req.params.id));
       res.json({ success: true });
@@ -1289,7 +1296,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/alert-recipients", requireAdmin, async (req, res) => {
+  app.post("/api/admin/alert-recipients", requireAdmin, requireOwner, async (req, res) => {
     try {
       const r = await storage.createAlertRecipient(req.body);
       res.json(r);
@@ -1298,7 +1305,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/admin/alert-recipients/:id", requireAdmin, async (req, res) => {
+  app.patch("/api/admin/alert-recipients/:id", requireAdmin, requireOwner, async (req, res) => {
     try {
       await storage.updateAlertRecipient(parseInt(req.params.id), req.body);
       res.json({ success: true });
@@ -1307,7 +1314,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/admin/alert-recipients/:id", requireAdmin, async (req, res) => {
+  app.delete("/api/admin/alert-recipients/:id", requireAdmin, requireOwner, async (req, res) => {
     try {
       await storage.deleteAlertRecipient(parseInt(req.params.id));
       res.json({ success: true });
@@ -1326,7 +1333,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/settings", requireAdmin, async (req, res) => {
+  app.post("/api/admin/settings", requireAdmin, requireOwner, async (req, res) => {
     try {
       await storage.upsertSetting(req.body.key, req.body.value);
       res.json({ success: true });

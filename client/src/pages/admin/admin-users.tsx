@@ -10,11 +10,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Shield, Plus, Trash2 } from "lucide-react";
+import { Shield, Plus, Trash2, Check, X, Info } from "lucide-react";
 import type { AdminUser } from "@shared/schema";
+import { useAdminAuth } from "@/hooks/use-admin-auth";
 
 export default function AdminUsersPage() {
   const { toast } = useToast();
+  const { admin } = useAdminAuth();
+  const isOwner = admin?.role === "owner";
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -59,6 +62,7 @@ export default function AdminUsersPage() {
           <h1 className="text-2xl font-bold" data-testid="text-admin-users-title">Admin Users</h1>
           <p className="text-muted-foreground">Allowlisted users who can access the admin portal</p>
         </div>
+        {isOwner && (
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button data-testid="button-add-admin">
@@ -113,6 +117,7 @@ export default function AdminUsersPage() {
             </div>
           </DialogContent>
         </Dialog>
+        )}
       </div>
 
       {isLoading ? (
@@ -147,21 +152,85 @@ export default function AdminUsersPage() {
                     <p className="text-sm text-muted-foreground" data-testid={`text-admin-email-${u.id}`}>{u.email}</p>
                   </div>
                 </div>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => {
-                    if (confirm("Remove this admin?")) deleteMutation.mutate(u.id);
-                  }}
-                  data-testid={`button-delete-admin-${u.id}`}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                {isOwner && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => {
+                      if (confirm("Remove this admin?")) deleteMutation.mutate(u.id);
+                    }}
+                    data-testid={`button-delete-admin-${u.id}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
               </CardContent>
             </Card>
           ))}
         </div>
       )}
+
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Info className="h-4 w-4 text-muted-foreground" />
+            <h3 className="font-semibold text-sm">Role Permissions</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-2 pr-4 font-medium text-muted-foreground">Permission</th>
+                  <th className="text-center py-2 px-3 font-medium">
+                    <Badge variant="secondary">Manager</Badge>
+                  </th>
+                  <th className="text-center py-2 px-3 font-medium">
+                    <Badge variant="default">Owner</Badge>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="text-xs">
+                {[
+                  { perm: "View dashboard & reports", manager: true, owner: true },
+                  { perm: "View cash counts & history", manager: true, owner: true },
+                  { perm: "View alerts", manager: true, owner: true },
+                  { perm: "Resolve alerts", manager: true, owner: true },
+                  { perm: "View & record collections", manager: true, owner: true },
+                  { perm: "Add locations & containers", manager: true, owner: true },
+                  { perm: "Edit locations & containers", manager: true, owner: true },
+                  { perm: "Add & edit staff", manager: true, owner: true },
+                  { perm: "View Boulevard sync status", manager: true, owner: true },
+                  { perm: "Trigger Boulevard sync", manager: true, owner: true },
+                  { perm: "Delete locations & containers", manager: false, owner: true },
+                  { perm: "Delete staff", manager: false, owner: true },
+                  { perm: "Delete markets", manager: false, owner: true },
+                  { perm: "Add & remove admin users", manager: false, owner: true },
+                  { perm: "Manage alert recipients", manager: false, owner: true },
+                  { perm: "Change system settings", manager: false, owner: true },
+                ].map((row, i) => (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="py-2 pr-4">{row.perm}</td>
+                    <td className="text-center py-2 px-3">
+                      {row.manager ? (
+                        <Check className="h-4 w-4 text-green-600 mx-auto" />
+                      ) : (
+                        <X className="h-4 w-4 text-muted-foreground/30 mx-auto" />
+                      )}
+                    </td>
+                    <td className="text-center py-2 px-3">
+                      {row.owner ? (
+                        <Check className="h-4 w-4 text-green-600 mx-auto" />
+                      ) : (
+                        <X className="h-4 w-4 text-muted-foreground/30 mx-auto" />
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
