@@ -108,13 +108,23 @@ export default function CountPage() {
     setStep("count");
   };
 
+  const [submitted, setSubmitted] = useState(false);
+
   const hasMismatch =
-    shiftType === "start" &&
+    submitted &&
     countedAmount !== "" &&
     expectedAmount !== null &&
     parseFloat(countedAmount) !== parseFloat(expectedAmount);
 
   const handleSubmit = () => {
+    // Set expected amount from prior query before comparing
+    if (priorQuery.data) {
+      setExpectedAmount(priorQuery.data.expectedAmount);
+    }
+    setSubmitted(true);
+  };
+
+  const handleConfirmSubmit = () => {
     if (hasMismatch && !discrepancyNote.trim()) {
       toast({ title: "Note required", description: "Please explain the discrepancy before submitting.", variant: "destructive" });
       return;
@@ -124,7 +134,7 @@ export default function CountPage() {
       estheticianId: parseInt(selectedEsthetician),
       type: shiftType,
       countedAmount,
-      expectedAmount: shiftType === "start" ? expectedAmount : null,
+      expectedAmount,
       discrepancyNote: hasMismatch ? discrepancyNote : null,
     });
   };
@@ -345,78 +355,90 @@ export default function CountPage() {
                   <Skeleton className="h-20 w-full" />
                 </CardContent>
               </Card>
-            ) : (
+            ) : null}
+
+            {!submitted ? (
               <Card>
-                <CardContent className="pt-6">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">Prior Shift End</p>
-                      <p className="text-xl font-bold" data-testid="text-prior-amount">
-                        ${priorQuery.data?.amount ?? "0.00"}
-                      </p>
+                <CardContent className="pt-6 space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="counted">Count the cash and enter the total</Label>
+                    <div className="relative">
+                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="counted"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        className="pl-9 text-lg"
+                        value={countedAmount}
+                        onChange={(e) => setCountedAmount(e.target.value)}
+                        data-testid="input-counted-amount"
+                      />
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">Expected Amount</p>
-                      <p className="text-xl font-bold text-primary" data-testid="text-expected-amount">
-                        ${priorQuery.data?.expectedAmount ?? "0.00"}
-                      </p>
-                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Enter the exact amount you counted before seeing the expected total.
+                    </p>
                   </div>
                 </CardContent>
               </Card>
-            )}
-
-            <Card>
-              <CardContent className="pt-6 space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="counted">Counted Cash Amount</Label>
-                  <div className="relative">
-                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="counted"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="0.00"
-                      className="pl-9 text-lg"
-                      value={countedAmount}
-                      onChange={(e) => {
-                        setCountedAmount(e.target.value);
-                        if (priorQuery.data) {
-                          setExpectedAmount(priorQuery.data.expectedAmount);
-                        }
-                      }}
-                      data-testid="input-counted-amount"
-                    />
-                  </div>
-                </div>
-
-                {hasMismatch && (
-                  <div className="rounded-md bg-destructive/10 p-3 border border-destructive/20">
-                    <div className="flex items-start gap-2">
-                      <AlertTriangle className="h-4 w-4 text-destructive mt-0.5" />
+            ) : (
+              <>
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <p className="text-sm font-medium text-destructive">Discrepancy Detected</p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Expected ${expectedAmount} but counted ${countedAmount}.
-                          Difference: ${(parseFloat(countedAmount) - parseFloat(expectedAmount || "0")).toFixed(2)}
+                        <p className="text-xs text-muted-foreground mb-1">Your Count</p>
+                        <p className="text-xl font-bold" data-testid="text-counted-result">
+                          ${countedAmount}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1">Expected Amount</p>
+                        <p className={`text-xl font-bold ${hasMismatch ? "text-destructive" : "text-green-600"}`} data-testid="text-expected-amount">
+                          ${expectedAmount ?? "0.00"}
                         </p>
                       </div>
                     </div>
-                    <div className="mt-3 space-y-2">
-                      <Label htmlFor="note" className="text-sm">Reason (required)</Label>
-                      <Textarea
-                        id="note"
-                        placeholder="Explain the discrepancy..."
-                        value={discrepancyNote}
-                        onChange={(e) => setDiscrepancyNote(e.target.value)}
-                        data-testid="input-discrepancy-note"
-                      />
-                    </div>
-                  </div>
+                    {!hasMismatch && (
+                      <div className="mt-3 flex items-center gap-2 text-green-600">
+                        <CheckCircle2 className="h-4 w-4" />
+                        <p className="text-sm font-medium">Amounts match</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {hasMismatch && (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="rounded-md bg-destructive/10 p-3 border border-destructive/20">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-destructive mt-0.5" />
+                          <div>
+                            <p className="text-sm font-medium text-destructive">Discrepancy Detected</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Expected ${expectedAmount} but you counted ${countedAmount}.
+                              Difference: ${(parseFloat(countedAmount) - parseFloat(expectedAmount || "0")).toFixed(2)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-3 space-y-2">
+                          <Label htmlFor="note" className="text-sm">Reason (required)</Label>
+                          <Textarea
+                            id="note"
+                            placeholder="Explain the discrepancy..."
+                            value={discrepancyNote}
+                            onChange={(e) => setDiscrepancyNote(e.target.value)}
+                            data-testid="input-discrepancy-note"
+                          />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 )}
-              </CardContent>
-            </Card>
+              </>
+            )}
 
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep("select")} data-testid="button-back">
@@ -428,13 +450,22 @@ export default function CountPage() {
                 disabled={
                   !countedAmount ||
                   submitMutation.isPending ||
-                  (hasMismatch && !discrepancyNote.trim())
+                  (submitted && hasMismatch && !discrepancyNote.trim())
                 }
-                onClick={handleSubmit}
+                onClick={submitted ? handleConfirmSubmit : handleSubmit}
                 data-testid="button-submit-count"
               >
-                {submitMutation.isPending ? "Submitting..." : "Submit Count"}
+                {submitMutation.isPending ? "Submitting..." : submitted ? "Confirm & Submit" : "Submit Count"}
               </Button>
+              {submitted && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => { setSubmitted(false); setCountedAmount(""); setExpectedAmount(null); setDiscrepancyNote(""); }}
+                >
+                  Recount
+                </Button>
+              )}
             </div>
           </div>
         )}
