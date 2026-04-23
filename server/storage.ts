@@ -646,6 +646,10 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async updateAdminUser(id: number, data: Partial<InsertAdminUser>) {
+    await db.update(adminUsers).set(data).where(eq(adminUsers.id, id));
+  }
+
   async deleteAdminUser(id: number) {
     await db.delete(adminUsers).where(eq(adminUsers.id, id));
   }

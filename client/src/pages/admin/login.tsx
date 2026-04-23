@@ -1,67 +1,94 @@
-import { useState } from "react";
-import { useAdminAuth } from "@/hooks/use-admin-auth";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import helloSugarLogo from "@assets/Logo_for_Swag_(1)_1770876580780.png";
 
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: any) => void;
+          renderButton: (element: HTMLElement, config: any) => void;
+        };
+      };
+    };
+  }
+}
+
 export default function AdminLoginPage() {
-  const [email, setEmail] = useState("");
-  const { login } = useAdminAuth();
   const { toast } = useToast();
+  const googleButtonRef = useRef<HTMLDivElement>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim()) return;
-
-    login.mutate(email.trim(), {
-      onError: (err: any) => {
-        toast({
-          title: "Login Failed",
-          description: err.message || "Email not on the admin allowlist.",
-          variant: "destructive",
-        });
-      },
-    });
+  const handleGoogleResponse = async (response: any) => {
+    setLoading(true);
+    try {
+      const res = await apiRequest("POST", "/api/admin/login/google", {
+        credential: response.credential,
+      });
+      const data = await res.json();
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/me"] });
+      toast({ title: "Welcome", description: `Signed in as ${data.name || data.email}` });
+    } catch (err: any) {
+      toast({
+        title: "Login Failed",
+        description: err.message || "Your account is not authorized.",
+        variant: "destructive",
+      });
+    }
+    setLoading(false);
   };
+
+  useEffect(() => {
+    // Load Google Identity Services script
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      if (window.google && googleButtonRef.current) {
+        window.google.accounts.id.initialize({
+          client_id: "1090858531166-oqdlo1h11vu7bpskrjf5q3nrf43lpvdk.apps.googleusercontent.com",
+          callback: handleGoogleResponse,
+          auto_select: true,
+          hosted_domain: "hellosugar.salon",
+        });
+        window.google.accounts.id.renderButton(googleButtonRef.current, {
+          theme: "outline",
+          size: "large",
+          width: "100%",
+          text: "signin_with",
+          shape: "rectangular",
+        });
+      }
+    };
+    document.head.appendChild(script);
+    return () => { document.head.removeChild(script); };
+  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4">
-            <img src={helloSugarLogo} alt="Hello Sugar" className="h-12 w-auto mx-auto" data-testid="img-login-logo" />
+            <img src={helloSugarLogo} alt="Hello Sugar" className="h-12 w-auto mx-auto" />
           </div>
-          <CardTitle className="text-xl" data-testid="text-login-title">CashControl Admin</CardTitle>
+          <CardTitle className="text-xl">CashControl Admin</CardTitle>
           <p className="text-sm text-muted-foreground mt-1">
-            Enter your authorized email to access the admin portal.
+            Sign in with your Hello Sugar Google account
           </p>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="admin@hellosugar.salon"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                data-testid="input-admin-email"
-              />
-            </div>
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={login.isPending || !email.trim()}
-              data-testid="button-admin-login"
-            >
-              {login.isPending ? "Signing in..." : "Sign In"}
-            </Button>
-          </form>
+        <CardContent className="flex flex-col items-center gap-4">
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Signing in...</p>
+          ) : (
+            <div ref={googleButtonRef} className="w-full flex justify-center" />
+          )}
+          <p className="text-xs text-muted-foreground text-center">
+            Only @hellosugar.salon accounts are authorized
+          </p>
         </CardContent>
       </Card>
     </div>

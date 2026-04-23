@@ -8,6 +8,10 @@ import session from "express-session";
 import OpenAI from "openai";
 import * as boulevard from "./boulevard";
 import { getRecentLogs } from "./logBuffer";
+import { OAuth2Client } from "google-auth-library";
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 // Singleton OpenAI client — reused across requests
 let openaiClient: OpenAI | null = null;
@@ -459,6 +463,53 @@ export async function registerRoutes(
       res.json({ email: admin.email, name: admin.name, role: admin.role });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Google OAuth login
+  app.post("/api/admin/login/google", async (req, res) => {
+    try {
+      const { credential } = req.body;
+      if (!credential) return res.status(400).json({ message: "No credential provided" });
+
+      if (!GOOGLE_CLIENT_ID) {
+        return res.status(500).json({ message: "Google OAuth not configured" });
+      }
+
+      // Verify the Google ID token
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: GOOGLE_CLIENT_ID,
+      });
+      const payload = ticket.getPayload();
+      if (!payload?.email) {
+        return res.status(400).json({ message: "Could not verify Google account" });
+      }
+
+      const email = payload.email.toLowerCase();
+
+      // Check domain restriction
+      if (!email.endsWith("@hellosugar.salon")) {
+        return res.status(403).json({ message: "Only hellosugar.salon accounts are allowed" });
+      }
+
+      // Check if user is in admin list
+      const admin = await storage.getAdminByEmail(email);
+      if (!admin) {
+        return res.status(403).json({ message: "Not authorized. Your email is not on the access list." });
+      }
+
+      // Update name from Google profile if not set
+      if (!admin.name && payload.name) {
+        await storage.updateAdminUser(admin.id, { name: payload.name });
+      }
+
+      req.session.adminEmail = admin.email;
+      req.session.adminRole = admin.role;
+      res.json({ email: admin.email, name: admin.name || payload.name, role: admin.role });
+    } catch (err: any) {
+      console.error("Google login error:", err);
+      res.status(401).json({ message: "Google authentication failed" });
     }
   });
 
