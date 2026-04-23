@@ -151,6 +151,7 @@ export async function fetchCashOrdersForLocation(
             cursor
             node {
               id number closedAt
+              closedBy { firstName lastName }
               client { firstName lastName }
               summary { currentTotal }
               paymentGroups {
@@ -200,26 +201,22 @@ export async function fetchCashOrdersForLocation(
       }
     }
 
-    // For cash orders, look up staff via appointments (separate query to avoid 500)
-    if (cashOrderNodes.length > 0) {
-      // Get appointments that reference these order IDs
-      const orderIds = cashOrderNodes.map((o: any) => o.id);
-      const staffMap = await resolveStaffForOrders(locationId, orderIds);
-
-      for (const order of cashOrderNodes) {
-        const client = order.client;
-        const clientName = client ? `${client.firstName || ""} ${client.lastName || ""}`.trim() : null;
-        cashOrders.push({
-          orderId: order.id,
-          orderNumber: order.number,
-          closedAt: order.closedAt,
-          locationId,
-          cashAmount: order.cashAmount,
-          totalAmount: order.totalAmount,
-          operatorName: staffMap.get(order.id) || null,
-          clientName,
-        });
-      }
+    // Add cash orders with staff name from closedBy and client name
+    for (const order of cashOrderNodes) {
+      const closedBy = order.closedBy;
+      const operatorName = closedBy ? `${closedBy.firstName || ""} ${closedBy.lastName || ""}`.trim() : null;
+      const client = order.client;
+      const clientName = client ? `${client.firstName || ""} ${client.lastName || ""}`.trim() : null;
+      cashOrders.push({
+        orderId: order.id,
+        orderNumber: order.number,
+        closedAt: order.closedAt,
+        locationId,
+        cashAmount: order.cashAmount,
+        totalAmount: order.totalAmount,
+        operatorName,
+        clientName,
+      });
     }
 
     if (reachedCutoff || !ordersData.orders?.pageInfo?.hasNextPage) break;
@@ -229,56 +226,6 @@ export async function fetchCashOrdersForLocation(
   return cashOrders;
 }
 
-/**
- * Resolve staff names for a set of order IDs by looking up each order's
- * line groups individually. We query lineGroups separately from paymentGroups
- * because combining them causes a Boulevard server 500.
- */
-async function resolveStaffForOrders(
-  locationId: string,
-  orderIds: string[]
-): Promise<Map<string, string>> {
-  const staffMap = new Map<string, string>();
-
-  // Query each order individually for its service line staff
-  for (const orderId of orderIds) {
-    try {
-      const data: any = await graphql(
-        `query($id: ID!) {
-          order(id: $id) {
-            lineGroups {
-              lines {
-                ... on OrderServiceLine { initialStaffId name }
-              }
-            }
-          }
-        }`,
-        { id: orderId }
-      );
-
-      const staffId = data.order?.lineGroups?.[0]?.lines?.[0]?.initialStaffId;
-      if (staffId) {
-        // Look up the staff member name
-        try {
-          const staffData: any = await graphql(
-            `query($id: ID!) { staffMember(id: $id) { firstName lastName } }`,
-            { id: staffId }
-          );
-          const s = staffData.staffMember;
-          if (s) {
-            staffMap.set(orderId, `${s.firstName} ${s.lastName}`.trim());
-          }
-        } catch {
-          // Staff lookup failed — skip
-        }
-      }
-    } catch {
-      // lineGroups query can 500 on some orders — skip silently
-    }
-  }
-
-  return staffMap;
-}
 
 /**
  * Check if Boulevard API credentials are configured

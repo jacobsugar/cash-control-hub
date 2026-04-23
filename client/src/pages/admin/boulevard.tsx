@@ -417,7 +417,7 @@ export default function BoulevardPage() {
                   <TableRow>
                     <TableHead>Date</TableHead>
                     <TableHead>Location</TableHead>
-                    <TableHead>Operator</TableHead>
+                    <TableHead>Esthetician</TableHead>
                     <TableHead>Client</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                   </TableRow>
