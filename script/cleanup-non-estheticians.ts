@@ -15,7 +15,8 @@ async function run() {
   const mappedLocations = await db.execute(
     sql`SELECT boulevard_location_id FROM locations WHERE boulevard_location_id IS NOT NULL`
   );
-  const blvdLocationIds = new Set((mappedLocations as any[]).map((r: any) => r.boulevard_location_id));
+  const rows = (mappedLocations as any).rows || mappedLocations;
+  const blvdLocationIds = new Set((rows as any[]).map((r: any) => r.boulevard_location_id));
 
   console.log("Fetching staff from Boulevard...");
   const allStaff = await boulevard.fetchAllStaffWithLocations();
