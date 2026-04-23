@@ -417,7 +417,6 @@ export default function BoulevardPage() {
                   <TableRow>
                     <TableHead>Date</TableHead>
                     <TableHead>Location</TableHead>
-                    <TableHead>Order #</TableHead>
                     <TableHead>Operator</TableHead>
                     <TableHead>Client</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
@@ -433,7 +432,6 @@ export default function BoulevardPage() {
                         <span className="text-xs text-muted-foreground">{t.marketName}</span>
                         <br />{t.locationName}
                       </TableCell>
-                      <TableCell className="font-mono text-xs">{t.orderId || "-"}</TableCell>
                       <TableCell>{t.operatorName || "-"}</TableCell>
                       <TableCell>{t.clientName || "-"}</TableCell>
                       <TableCell className="text-right font-mono">${t.amount}</TableCell>
