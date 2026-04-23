@@ -7,9 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Search, Database, RefreshCw, CheckCircle2, AlertTriangle, Clock, Settings2 } from "lucide-react";
+import { Search, Database, RefreshCw, CheckCircle2, AlertTriangle, Clock, Settings2, ChevronDown, ChevronRight, ChevronLeft } from "lucide-react";
 import type { BoulevardTransaction, Location } from "@shared/schema";
 
 interface TransactionWithDetails extends BoulevardTransaction {
@@ -57,10 +58,15 @@ function timeAgo(dateStr: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+const PAGE_SIZE = 25;
+
 export default function BoulevardPage() {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [locationFilter, setLocationFilter] = useState("all");
+  const [page, setPage] = useState(0);
+  const [locationStatusOpen, setLocationStatusOpen] = useState(false);
+  const [syncHistoryOpen, setSyncHistoryOpen] = useState(false);
 
   const { data: syncStatus } = useQuery<SyncStatus>({
     queryKey: ["/api/admin/boulevard/sync-status"],
@@ -146,13 +152,16 @@ export default function BoulevardPage() {
       const q = search.toLowerCase();
       if (!(t.operatorName || "").toLowerCase().includes(q) &&
           !(t.clientName || "").toLowerCase().includes(q) &&
-          !(t.orderId || "").toLowerCase().includes(q) &&
           !(t.locationName || "").toLowerCase().includes(q) &&
           !(t.marketName || "").toLowerCase().includes(q)) return false;
     }
     if (locationFilter !== "all" && String(t.locationId) !== locationFilter) return false;
     return true;
   }) || [], [transactions, search, locationFilter]);
+
+  // Reset page when filters change
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
     <div className="space-y-6">
@@ -171,7 +180,7 @@ export default function BoulevardPage() {
       </div>
 
       {/* Sync Overview */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <Card>
           <CardContent className="pt-4 pb-4">
             <p className="text-xs text-muted-foreground">Last Sync</p>
@@ -202,7 +211,7 @@ export default function BoulevardPage() {
           <CardContent className="pt-4 pb-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">Sync Frequency</p>
+                <p className="text-xs text-muted-foreground">Frequency</p>
                 <p className="text-lg font-bold">{syncStatus?.syncFrequencyMinutes ?? 10}m</p>
               </div>
               <Select
@@ -225,7 +234,7 @@ export default function BoulevardPage() {
           <CardContent className="pt-4 pb-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">Operating Hours</p>
+                <p className="text-xs text-muted-foreground">Hours</p>
                 <p className="text-sm font-medium">
                   {syncStatus?.operatingStartHour ?? 7}:00 - {syncStatus?.operatingEndHour ?? 21}:00
                   {syncStatus && !syncStatus.currentlySyncing && (
@@ -241,7 +250,7 @@ export default function BoulevardPage() {
                     endHour: syncStatus?.operatingEndHour ?? 21,
                   })}
                 >
-                  <SelectTrigger className="w-[70px] h-8 text-xs">
+                  <SelectTrigger className="w-[60px] h-7 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -250,7 +259,6 @@ export default function BoulevardPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <span className="self-center text-xs text-muted-foreground">to</span>
                 <Select
                   value={String(syncStatus?.operatingEndHour ?? 21)}
                   onValueChange={(v) => operatingHoursMutation.mutate({
@@ -258,7 +266,7 @@ export default function BoulevardPage() {
                     endHour: parseInt(v),
                   })}
                 >
-                  <SelectTrigger className="w-[70px] h-8 text-xs">
+                  <SelectTrigger className="w-[60px] h-7 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -273,105 +281,10 @@ export default function BoulevardPage() {
         </Card>
       </div>
 
-      {/* Per-Location Sync Status */}
+      {/* Imported Cash Transactions — always visible, near top */}
       <Card>
         <CardHeader className="pb-2">
-          <h3 className="font-semibold text-sm">Location Sync Status</h3>
-        </CardHeader>
-        <CardContent>
-          {!locationStatuses ? (
-            <Skeleton className="h-24 w-full" />
-          ) : (
-            <div className="space-y-2">
-              {locationStatuses.map((loc) => (
-                <div key={loc.locationId} className="flex items-center justify-between gap-2 rounded-md border p-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {loc.lastSyncStatus === "success" ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-                    ) : loc.lastSyncStatus === "error" ? (
-                      <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
-                    ) : (
-                      <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{loc.locationName}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {timeAgo(loc.lastSyncAt)}
-                        {loc.lastImportCount > 0 && ` · ${loc.lastImportCount} imported`}
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={syncLocationMutation.isPending}
-                    onClick={() => syncLocationMutation.mutate(loc.locationId)}
-                  >
-                    <RefreshCw className="h-3 w-3 mr-1" />
-                    Sync
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Sync History */}
-      <Card>
-        <CardHeader className="pb-2">
-          <h3 className="font-semibold text-sm">Sync History</h3>
-        </CardHeader>
-        <CardContent>
-          {!syncHistory ? (
-            <Skeleton className="h-24 w-full" />
-          ) : syncHistory.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">No sync history yet</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Time</TableHead>
-                    <TableHead>Location</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Imported</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {syncHistory.slice(0, 20).map((entry) => (
-                    <TableRow key={entry.id}>
-                      <TableCell className="text-xs whitespace-nowrap">
-                        {entry.completedAt ? new Date(entry.completedAt).toLocaleString() : "In progress..."}
-                      </TableCell>
-                      <TableCell className="text-sm">{entry.locationName}</TableCell>
-                      <TableCell>
-                        <Badge variant={entry.syncType === "auto" ? "secondary" : entry.syncType === "manual" ? "default" : "outline"}>
-                          {entry.syncType}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {entry.status === "success" ? (
-                          <Badge variant="default" className="bg-green-500">success</Badge>
-                        ) : (
-                          <Badge variant="destructive">error</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right font-mono">{entry.transactionsImported}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Imported Transactions */}
-      <Card>
-        <CardHeader className="pb-2">
-          <h3 className="font-semibold text-sm">Imported Cash Transactions</h3>
+          <h3 className="font-semibold text-sm">Cash Transactions</h3>
         </CardHeader>
         <CardContent>
           <div className="flex items-center gap-2 flex-wrap mb-4">
@@ -381,10 +294,10 @@ export default function BoulevardPage() {
                 placeholder="Search transactions..."
                 className="pl-9"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(0); }}
               />
             </div>
-            <Select value={locationFilter} onValueChange={setLocationFilter}>
+            <Select value={locationFilter} onValueChange={(v) => { setLocationFilter(v); setPage(0); }}>
               <SelectTrigger className="w-[220px]">
                 <SelectValue placeholder="All Locations" />
               </SelectTrigger>
@@ -408,41 +321,179 @@ export default function BoulevardPage() {
           ) : filtered.length === 0 ? (
             <div className="text-center py-12">
               <Database className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
-              <p className="text-muted-foreground">No cash transactions imported yet. Click "Sync All Now" to pull from Boulevard.</p>
+              <p className="text-muted-foreground">No cash transactions found.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Location</TableHead>
-                    <TableHead>Esthetician</TableHead>
-                    <TableHead>Client</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.map((t) => (
-                    <TableRow key={t.id}>
-                      <TableCell className="whitespace-nowrap text-sm">
-                        {new Date(t.date).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-xs text-muted-foreground">{t.marketName}</span>
-                        <br />{t.locationName}
-                      </TableCell>
-                      <TableCell>{t.operatorName || "-"}</TableCell>
-                      <TableCell>{t.clientName || "-"}</TableCell>
-                      <TableCell className="text-right font-mono">${t.amount}</TableCell>
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Location</TableHead>
+                      <TableHead>Esthetician</TableHead>
+                      <TableHead>Client</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {paged.map((t) => (
+                      <TableRow key={t.id}>
+                        <TableCell className="whitespace-nowrap text-sm">
+                          {new Date(t.date).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">{t.marketName}</span>
+                          <br />{t.locationName}
+                        </TableCell>
+                        <TableCell>{t.operatorName || "-"}</TableCell>
+                        <TableCell>{t.clientName || "-"}</TableCell>
+                        <TableCell className="text-right font-mono">${t.amount}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between mt-4">
+                  <p className="text-xs text-muted-foreground">
+                    Showing {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, filtered.length)} of {filtered.length}
+                  </p>
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={page === 0}
+                      onClick={() => setPage(p => p - 1)}
+                    >
+                      <ChevronLeft className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={page >= totalPages - 1}
+                      onClick={() => setPage(p => p + 1)}
+                    >
+                      <ChevronRight className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
+
+      {/* Location Sync Status — accordion, closed by default */}
+      <Collapsible open={locationStatusOpen} onOpenChange={setLocationStatusOpen}>
+        <Card>
+          <CollapsibleTrigger className="w-full">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between cursor-pointer">
+              <h3 className="font-semibold text-sm">Location Sync Status</h3>
+              {locationStatusOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </CardHeader>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <CardContent>
+              {!locationStatuses ? (
+                <Skeleton className="h-24 w-full" />
+              ) : (
+                <div className="space-y-2">
+                  {locationStatuses.map((loc) => (
+                    <div key={loc.locationId} className="flex items-center justify-between gap-2 rounded-md border p-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        {loc.lastSyncStatus === "success" ? (
+                          <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                        ) : loc.lastSyncStatus === "error" ? (
+                          <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+                        ) : (
+                          <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{loc.locationName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {timeAgo(loc.lastSyncAt)}
+                            {loc.lastImportCount > 0 && ` · ${loc.lastImportCount} imported`}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={syncLocationMutation.isPending}
+                        onClick={() => syncLocationMutation.mutate(loc.locationId)}
+                      >
+                        <RefreshCw className="h-3 w-3 mr-1" />
+                        Sync
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
+
+      {/* Sync History — accordion, closed by default */}
+      <Collapsible open={syncHistoryOpen} onOpenChange={setSyncHistoryOpen}>
+        <Card>
+          <CollapsibleTrigger className="w-full">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between cursor-pointer">
+              <h3 className="font-semibold text-sm">Sync History</h3>
+              {syncHistoryOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </CardHeader>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <CardContent>
+              {!syncHistory ? (
+                <Skeleton className="h-24 w-full" />
+              ) : syncHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">No sync history yet</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Location</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Imported</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {syncHistory.slice(0, 20).map((entry) => (
+                        <TableRow key={entry.id}>
+                          <TableCell className="text-xs whitespace-nowrap">
+                            {entry.completedAt ? new Date(entry.completedAt).toLocaleString() : "In progress..."}
+                          </TableCell>
+                          <TableCell className="text-sm">{entry.locationName}</TableCell>
+                          <TableCell>
+                            <Badge variant={entry.syncType === "auto" ? "secondary" : entry.syncType === "manual" ? "default" : "outline"}>
+                              {entry.syncType}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {entry.status === "success" ? (
+                              <Badge variant="default" className="bg-green-500">success</Badge>
+                            ) : (
+                              <Badge variant="destructive">error</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right font-mono">{entry.transactionsImported}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
     </div>
   );
 }
