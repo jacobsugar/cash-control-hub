@@ -707,14 +707,14 @@ export class DatabaseStorage implements IStorage {
     const lastShifts = containerIds.length > 0 ? await db.execute(sql`
       SELECT DISTINCT ON (container_id) *
       FROM shift_counts
-      WHERE container_id = ANY(${containerIds})
+      WHERE container_id = ANY(${sql.raw(`ARRAY[${containerIds.join(",")}]`)})
       ORDER BY container_id, created_at DESC
     `) : [];
 
     const lastCollections = containerIds.length > 0 ? await db.execute(sql`
       SELECT DISTINCT ON (container_id) *
       FROM cash_collections
-      WHERE container_id = ANY(${containerIds})
+      WHERE container_id = ANY(${sql.raw(`ARRAY[${containerIds.join(",")}]`)})
       ORDER BY container_id, created_at DESC
     `) : [];
 
