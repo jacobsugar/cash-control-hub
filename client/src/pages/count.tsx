@@ -419,58 +419,103 @@ export default function CountPage() {
               </Card>
             ) : (
               <>
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">Your Count</p>
-                        <p className="text-xl font-bold" data-testid="text-counted-result">
-                          ${countedAmount}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">Expected Amount</p>
-                        <p className={`text-xl font-bold ${hasMismatch ? "text-destructive" : "text-green-600"}`} data-testid="text-expected-amount">
-                          ${expectedAmount ?? "0.00"}
-                        </p>
-                      </div>
-                    </div>
-                    {!hasMismatch && (
-                      <div className="mt-3 flex items-center gap-2 text-green-600">
-                        <CheckCircle2 className="h-4 w-4" />
-                        <p className="text-sm font-medium">Amounts match</p>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                {/* First attempt mismatch: hide expected amount, just say there's a discrepancy */}
+                {hasMismatch && !recounting ? (
+                  <>
+                    <Card>
+                      <CardContent className="pt-6">
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-1">Your Count</p>
+                          <p className="text-xl font-bold" data-testid="text-counted-result">
+                            ${countedAmount}
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
 
-                {hasMismatch && (
-                  <Card>
-                    <CardContent className="pt-6">
-                      <div className="rounded-md bg-destructive/10 p-3 border border-destructive/20">
-                        <div className="flex items-start gap-2">
-                          <AlertTriangle className="h-4 w-4 text-destructive mt-0.5" />
+                    <Card>
+                      <CardContent className="pt-6">
+                        <div className="rounded-md bg-destructive/10 p-3 border border-destructive/20">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="h-4 w-4 text-destructive mt-0.5" />
+                            <div>
+                              <p className="text-sm font-medium text-destructive">Discrepancy Detected</p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Your count doesn't match the expected amount. Please add a note and recount.
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-3 space-y-2">
+                            <Label htmlFor="note" className="text-sm">Reason (required)</Label>
+                            <Textarea
+                              id="note"
+                              placeholder="Explain what may have been miscounted..."
+                              value={discrepancyNote}
+                              onChange={(e) => setDiscrepancyNote(e.target.value)}
+                              data-testid="input-discrepancy-note"
+                            />
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </>
+                ) : (
+                  <>
+                    {/* Recount or matching: show both amounts */}
+                    <Card>
+                      <CardContent className="pt-6">
+                        <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <p className="text-sm font-medium text-destructive">Discrepancy Detected</p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Expected ${expectedAmount} but you counted ${countedAmount}.
-                              Difference: ${(parseFloat(countedAmount) - parseFloat(expectedAmount || "0")).toFixed(2)}
+                            <p className="text-xs text-muted-foreground mb-1">Your Count</p>
+                            <p className="text-xl font-bold" data-testid="text-counted-result">
+                              ${countedAmount}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1">Expected Amount</p>
+                            <p className={`text-xl font-bold ${hasMismatch ? "text-destructive" : "text-green-600"}`} data-testid="text-expected-amount">
+                              ${expectedAmount ?? "0.00"}
                             </p>
                           </div>
                         </div>
-                        <div className="mt-3 space-y-2">
-                          <Label htmlFor="note" className="text-sm">Reason (required)</Label>
-                          <Textarea
-                            id="note"
-                            placeholder="Explain the discrepancy..."
-                            value={discrepancyNote}
-                            onChange={(e) => setDiscrepancyNote(e.target.value)}
-                            data-testid="input-discrepancy-note"
-                          />
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                        {!hasMismatch && (
+                          <div className="mt-3 flex items-center gap-2 text-green-600">
+                            <CheckCircle2 className="h-4 w-4" />
+                            <p className="text-sm font-medium">Amounts match</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    {hasMismatch && recounting && (
+                      <Card>
+                        <CardContent className="pt-6">
+                          <div className="rounded-md bg-destructive/10 p-3 border border-destructive/20">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle className="h-4 w-4 text-destructive mt-0.5" />
+                              <div>
+                                <p className="text-sm font-medium text-destructive">Discrepancy Detected</p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Expected ${expectedAmount} but you counted ${countedAmount}.
+                                  Difference: ${(parseFloat(countedAmount) - parseFloat(expectedAmount || "0")).toFixed(2)}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="mt-3 space-y-2">
+                              <Label htmlFor="note" className="text-sm">Reason (required)</Label>
+                              <Textarea
+                                id="note"
+                                placeholder="Explain the discrepancy..."
+                                value={discrepancyNote}
+                                onChange={(e) => setDiscrepancyNote(e.target.value)}
+                                data-testid="input-discrepancy-note"
+                              />
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -479,21 +524,24 @@ export default function CountPage() {
               <Button variant="outline" onClick={() => setStep("select")} data-testid="button-back">
                 Back
               </Button>
-              <Button
-                className="flex-1"
-                size="lg"
-                disabled={
-                  !countedAmount ||
-                  submitMutation.isPending ||
-                  (submitted && hasMismatch && !discrepancyNote.trim())
-                }
-                onClick={submitted ? handleConfirmSubmit : handleSubmit}
-                data-testid="button-submit-count"
-              >
-                {submitMutation.isPending ? "Submitting..." : submitted ? "Confirm & Submit" : "Submit Count"}
-              </Button>
+              {/* First mismatch: hide Confirm, only show Recount */}
+              {!(submitted && hasMismatch && !recounting) && (
+                <Button
+                  className="flex-1"
+                  size="lg"
+                  disabled={
+                    !countedAmount ||
+                    submitMutation.isPending ||
+                    (submitted && hasMismatch && !discrepancyNote.trim())
+                  }
+                  onClick={submitted ? handleConfirmSubmit : handleSubmit}
+                  data-testid="button-submit-count"
+                >
+                  {submitMutation.isPending ? "Submitting..." : submitted ? "Confirm & Submit" : "Submit Count"}
+                </Button>
+              )}
             </div>
-            {submitted && hasMismatch && (
+            {submitted && hasMismatch && !recounting && (
               <Button
                 variant="outline"
                 className="w-full"
