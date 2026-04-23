@@ -31,8 +31,11 @@ async function run() {
   const allEsth = await db.select().from(estheticians);
   console.log(`${allEsth.length} estheticians in the database.`);
 
-  // Find ones to delete: have a boulevardStaffId that's NOT in the valid set
-  const toDelete = allEsth.filter(e => e.boulevardStaffId && !validStaffIds.has(e.boulevardStaffId));
+  // Find ones to delete: have a boulevardStaffId that's NOT in the valid set, OR have no boulevardStaffId at all
+  const toDelete = allEsth.filter(e =>
+    (e.boulevardStaffId && !validStaffIds.has(e.boulevardStaffId)) ||
+    (!e.boulevardStaffId)
+  );
   console.log(`${toDelete.length} to delete (not estheticians in Boulevard).`);
 
   for (const e of toDelete) {
