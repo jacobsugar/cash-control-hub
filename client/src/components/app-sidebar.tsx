@@ -27,7 +27,7 @@ import {
   SidebarFooter,
   useSidebar,
 } from "@/components/ui/sidebar";
-import helloSugarLogo from "@assets/Logo_for_Swag_(1)_1770876580780.png";
+import helloSugarLogo from "@/assets/hello-sugar-logo.png";
 
 const mainItems = [
   { title: "Dashboard", url: "/admin", icon: LayoutDashboard },

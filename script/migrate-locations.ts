@@ -1,7 +1,7 @@
 /**
  * One-time migration script to set up Vegas & Austin locations in production.
  *
- * Run from Replit shell:
+ * Run with:
  *   npx tsx script/migrate-locations.ts
  *
  * This script:

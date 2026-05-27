@@ -22,7 +22,7 @@ import {
   ScanLine,
   AlertTriangle,
 } from "lucide-react";
-import helloSugarLogo from "@assets/Logo_for_Swag_(1)_1770876580780.png";
+import helloSugarLogo from "@/assets/hello-sugar-logo.png";
 import type { Esthetician, Location, Container } from "@shared/schema";
 
 export default function ReceiptUploadPage() {

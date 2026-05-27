@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { DollarSign, ArrowRight, AlertTriangle, CheckCircle2, Clock, Shield } from "lucide-react";
-import helloSugarLogo from "@assets/Logo_for_Swag_(1)_1770876580780.png";
+import helloSugarLogo from "@/assets/hello-sugar-logo.png";
 import type { Esthetician, Location, Container, Market } from "@shared/schema";
 
 export default function CountPage() {

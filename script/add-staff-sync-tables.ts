@@ -1,7 +1,7 @@
 /**
  * Add staff sync columns and esthetician_locations table.
  *
- * Run from Replit shell:
+ * Run with:
  *   npx tsx script/add-staff-sync-tables.ts
  *
  * For production:

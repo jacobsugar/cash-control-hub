@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import helloSugarLogo from "@assets/Logo_for_Swag_(1)_1770876580780.png";
+import helloSugarLogo from "@/assets/hello-sugar-logo.png";
 
 declare global {
   interface Window {

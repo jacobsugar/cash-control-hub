@@ -1,7 +1,7 @@
 /**
  * Add boulevard_sync_history table to the database.
  *
- * Run from Replit shell:
+ * Run with:
  *   npx tsx script/add-sync-history-table.ts
  *
  * For production:
