@@ -112,6 +112,13 @@ export default function CountPage() {
     }
     setSyncing(false);
 
+    // Reset count state so user always starts with a fresh blind count
+    setSubmitted(false);
+    setRecounting(false);
+    setCountedAmount("");
+    setExpectedAmount(null);
+    setDiscrepancyNote("");
+
     setStep("count");
   };
 

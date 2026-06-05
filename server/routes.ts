@@ -376,12 +376,23 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
+  // Trust reverse proxy (Replit/Railway) so secure cookies work behind HTTPS
+  const isProduction = process.env.NODE_ENV === "production" || !!process.env.REPL_SLUG;
+  if (isProduction) {
+    app.set("trust proxy", 1);
+  }
+
   // Session setup
   app.use(session({
     secret: process.env.SESSION_SECRET || "cashcontrol-secret-change-me",
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 24 * 60 * 60 * 1000 },
+    cookie: {
+      maxAge: 24 * 60 * 60 * 1000,
+      secure: isProduction,
+      sameSite: "lax",
+      httpOnly: true,
+    },
   }));
 
   // OCR rate limiting: max 10 requests per IP per minute
@@ -1267,7 +1278,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/users", requireAdmin, requireOwner, async (req, res) => {
+  app.post("/api/admin/users", requireAdmin, async (req, res) => {
     try {
       const user = await storage.createAdminUser(req.body);
       res.json(user);
@@ -1276,7 +1287,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/admin/users/:id", requireAdmin, requireOwner, async (req, res) => {
+  app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
     try {
       await storage.deleteAdminUser(parseInt(req.params.id));
       res.json({ success: true });
