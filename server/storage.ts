@@ -740,27 +740,30 @@ export class DatabaseStorage implements IStorage {
     const containerIds = containerOpts.map(c => c.id);
 
     // Get last shift count per container using a single query with DISTINCT ON
-    const lastShifts = containerIds.length > 0 ? await db.execute(sql`
+    const lastShiftsResult = containerIds.length > 0 ? await db.execute(sql`
       SELECT DISTINCT ON (container_id) *
       FROM shift_counts
       WHERE container_id = ANY(${sql.raw(`ARRAY[${containerIds.join(",")}]`)})
       ORDER BY container_id, created_at DESC
-    `) : [];
+    `) : { rows: [] };
 
-    const lastCollections = containerIds.length > 0 ? await db.execute(sql`
+    const lastCollectionsResult = containerIds.length > 0 ? await db.execute(sql`
       SELECT DISTINCT ON (container_id) *
       FROM cash_collections
       WHERE container_id = ANY(${sql.raw(`ARRAY[${containerIds.join(",")}]`)})
       ORDER BY container_id, created_at DESC
-    `) : [];
+    `) : { rows: [] };
+
+    const lastShifts = Array.isArray(lastShiftsResult) ? lastShiftsResult : (lastShiftsResult as any).rows || [];
+    const lastCollections = Array.isArray(lastCollectionsResult) ? lastCollectionsResult : (lastCollectionsResult as any).rows || [];
 
     // Index by container ID for O(1) lookups
     const shiftsByContainer = new Map<number, any>();
-    for (const row of lastShifts as any[]) {
+    for (const row of lastShifts) {
       shiftsByContainer.set(row.container_id, row);
     }
     const collectionsByContainer = new Map<number, any>();
-    for (const row of lastCollections as any[]) {
+    for (const row of lastCollections) {
       collectionsByContainer.set(row.container_id, row);
     }
 
