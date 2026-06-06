@@ -4,7 +4,7 @@ import pg from "pg";
 import {
   markets, locations, containers, estheticians, estheticianLocations, shiftCounts, receipts,
   boulevardTransactions, alerts, cashCollections, adminUsers, alertRecipients, appSettings,
-  boulevardSyncHistory,
+  boulevardSyncHistory, adminUserMarkets, shiftReminders,
   type InsertMarket, type InsertLocation, type InsertContainer, type InsertEsthetician,
   type InsertShiftCount, type InsertReceipt, type InsertBoulevardTransaction,
   type InsertAlert, type InsertCashCollection, type InsertAdminUser,
@@ -48,7 +48,7 @@ export interface IStorage {
   getEstheticiansByLocation(locationId: number): Promise<Esthetician[]>;
   createEsthetician(data: InsertEsthetician): Promise<Esthetician>;
   updateEsthetician(id: number, data: Partial<InsertEsthetician>): Promise<void>;
-  upsertEstheticianFromBoulevard(data: { name: string; boulevardStaffId: string }): Promise<Esthetician>;
+  upsertEstheticianFromBoulevard(data: { name: string; boulevardStaffId: string; phone?: string | null; email?: string | null; active?: boolean }): Promise<Esthetician>;
   setEstheticianLocations(estheticianId: number, locationIds: number[]): Promise<void>;
   deactivateEstheticiansNotIn(boulevardStaffIds: string[]): Promise<number>;
   deleteEsthetician(id: number): Promise<void>;
@@ -83,9 +83,12 @@ export interface IStorage {
 
   // Admin Users
   getAdminUsers(): Promise<AdminUser[]>;
+  getAdminUser(id: number): Promise<AdminUser | undefined>;
   getAdminByEmail(email: string): Promise<AdminUser | undefined>;
   createAdminUser(data: InsertAdminUser): Promise<AdminUser>;
   deleteAdminUser(id: number): Promise<void>;
+  getAdminUserMarkets(adminUserId: number): Promise<number[]>;
+  setAdminUserMarkets(adminUserId: number, marketIds: number[]): Promise<void>;
 
   // Alert Recipients
   getAlertRecipients(): Promise<AlertRecipient[]>;
@@ -104,6 +107,11 @@ export interface IStorage {
   // Efficient queries for missing shift checks
   getOpenStartShifts(olderThan: Date): Promise<any[]>;
   getReceiptsCountSince(since: Date): Promise<number>;
+
+  // Shift Reminders
+  hasShiftReminderBeenSent(estheticianId: number, locationId: number, reminderType: string, since: Date): Promise<boolean>;
+  createShiftReminder(data: { estheticianId: number; locationId: number; reminderType: string; appointmentDate: Date }): Promise<any>;
+  hasStartShiftToday(estheticianId: number, locationId: number, since: Date): Promise<boolean>;
 
   // Boulevard Sync History
   createSyncHistoryEntry(data: InsertBoulevardSyncHistory): Promise<BoulevardSyncHistoryType>;
@@ -337,23 +345,27 @@ export class DatabaseStorage implements IStorage {
     await db.update(estheticians).set(data).where(eq(estheticians.id, id));
   }
 
-  async upsertEstheticianFromBoulevard(data: { name: string; boulevardStaffId: string }) {
+  async upsertEstheticianFromBoulevard(data: {
+    name: string;
+    boulevardStaffId: string;
+    phone?: string | null;
+    email?: string | null;
+    active?: boolean;
+  }) {
+    const isActive = data.active !== undefined ? data.active : true;
+    const updateFields: any = {
+      name: data.name,
+      active: isActive,
+      phone: data.phone ?? null,
+      email: data.email ?? null,
+      lastSyncedAt: new Date(),
+    };
+
     // Check if already linked by Boulevard ID
     let esth = await this.getEstheticianByBoulevardId(data.boulevardStaffId);
     if (esth) {
-      // Update name if changed
-      if (esth.name !== data.name || !esth.active) {
-        await db.update(estheticians).set({
-          name: data.name,
-          active: true,
-          lastSyncedAt: new Date(),
-        } as any).where(eq(estheticians.id, esth.id));
-      } else {
-        await db.update(estheticians).set({
-          lastSyncedAt: new Date(),
-        } as any).where(eq(estheticians.id, esth.id));
-      }
-      return { ...esth, name: data.name, active: true };
+      await db.update(estheticians).set(updateFields).where(eq(estheticians.id, esth.id));
+      return { ...esth, ...updateFields };
     }
 
     // Try to match by name (for existing manually-added estheticians)
@@ -364,19 +376,16 @@ export class DatabaseStorage implements IStorage {
       ));
     if (nameMatch) {
       await db.update(estheticians).set({
+        ...updateFields,
         boulevardStaffId: data.boulevardStaffId,
-        active: true,
-        lastSyncedAt: new Date(),
-      } as any).where(eq(estheticians.id, nameMatch.id));
-      return { ...nameMatch, boulevardStaffId: data.boulevardStaffId, active: true };
+      }).where(eq(estheticians.id, nameMatch.id));
+      return { ...nameMatch, ...updateFields, boulevardStaffId: data.boulevardStaffId };
     }
 
     // Create new
     const [created] = await db.insert(estheticians).values({
-      name: data.name,
+      ...updateFields,
       boulevardStaffId: data.boulevardStaffId,
-      active: true,
-      lastSyncedAt: new Date(),
     } as any).returning();
     return created;
   }
@@ -650,8 +659,31 @@ export class DatabaseStorage implements IStorage {
     await db.update(adminUsers).set(data).where(eq(adminUsers.id, id));
   }
 
+  async getAdminUser(id: number) {
+    const [user] = await db.select().from(adminUsers).where(eq(adminUsers.id, id));
+    return user;
+  }
+
   async deleteAdminUser(id: number) {
+    // Clean up market assignments first
+    await db.delete(adminUserMarkets).where(eq(adminUserMarkets.adminUserId, id));
     await db.delete(adminUsers).where(eq(adminUsers.id, id));
+  }
+
+  async getAdminUserMarkets(adminUserId: number) {
+    const rows = await db.select({ marketId: adminUserMarkets.marketId })
+      .from(adminUserMarkets)
+      .where(eq(adminUserMarkets.adminUserId, adminUserId));
+    return rows.map(r => r.marketId);
+  }
+
+  async setAdminUserMarkets(adminUserId: number, marketIds: number[]) {
+    await db.delete(adminUserMarkets).where(eq(adminUserMarkets.adminUserId, adminUserId));
+    if (marketIds.length > 0) {
+      await db.insert(adminUserMarkets).values(
+        marketIds.map(marketId => ({ adminUserId, marketId } as any))
+      );
+    }
   }
 
   // Alert Recipients
@@ -822,6 +854,38 @@ export class DatabaseStorage implements IStorage {
       }
     }
     return openShifts;
+  }
+
+  // Shift Reminders
+  async hasShiftReminderBeenSent(estheticianId: number, locationId: number, reminderType: string, since: Date) {
+    const [row] = await db.select({ id: shiftReminders.id }).from(shiftReminders)
+      .where(and(
+        eq(shiftReminders.estheticianId, estheticianId),
+        eq(shiftReminders.locationId, locationId),
+        eq(shiftReminders.reminderType, reminderType),
+        gte(shiftReminders.sentAt, since),
+      ))
+      .limit(1);
+    return !!row;
+  }
+
+  async createShiftReminder(data: { estheticianId: number; locationId: number; reminderType: string; appointmentDate: Date }) {
+    const [r] = await db.insert(shiftReminders).values(data as any).returning();
+    return r;
+  }
+
+  async hasStartShiftToday(estheticianId: number, locationId: number, since: Date) {
+    // Check if there's a start-of-shift count for this esthetician at any container in this location since the given time
+    const [row] = await db.select({ id: shiftCounts.id }).from(shiftCounts)
+      .innerJoin(containers, eq(shiftCounts.containerId, containers.id))
+      .where(and(
+        eq(shiftCounts.estheticianId, estheticianId),
+        eq(containers.locationId, locationId),
+        eq(shiftCounts.type, "start"),
+        gte(shiftCounts.createdAt, since),
+      ))
+      .limit(1);
+    return !!row;
   }
 
   // Boulevard Sync History

@@ -64,6 +64,7 @@ const USER_ID_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 async function sendAlertSms(alertData: {
   type: string;
+  marketName?: string | null;
   staffName?: string | null;
   locationName?: string | null;
   containerName?: string | null;
@@ -72,10 +73,11 @@ async function sendAlertSms(alertData: {
   note?: string | null;
 }) {
   try {
-    const [apiKey, fromNumberRaw, recipients] = await Promise.all([
+    const [apiKey, fromNumberRaw, recipients, allMarkets] = await Promise.all([
       storage.getSetting("quo_api_key"),
       storage.getSetting("quo_from_number"),
       storage.getAlertRecipients(),
+      storage.getMarkets(),
     ]);
 
     if (!apiKey || !fromNumberRaw) {
@@ -93,9 +95,25 @@ async function sendAlertSms(alertData: {
       collection_mismatch: "notifyCollectionMismatch",
     };
     const fieldName = alertTypeToField[alertData.type] || null;
-    const activeRecipients = recipients.filter((r: any) =>
+    let activeRecipients = recipients.filter((r: any) =>
       r.active && (fieldName ? r[fieldName] !== false : true)
     );
+
+    // Filter by market assignment for managers
+    if (alertData.marketName) {
+      const marketId = allMarkets.find(m => m.name === alertData.marketName)?.id;
+      const filtered = await Promise.all(activeRecipients.map(async (r: any) => {
+        if (!r.adminUserId) return r; // no admin link = send all (legacy)
+        const admin = await storage.getAdminUser(r.adminUserId);
+        if (!admin) return r;
+        if (admin.role === "owner") return r; // owners get everything
+        const assignedMarkets = await storage.getAdminUserMarkets(r.adminUserId);
+        if (assignedMarkets.length === 0) return r; // no markets assigned = send all
+        return marketId && assignedMarkets.includes(marketId) ? r : null;
+      }));
+      activeRecipients = filtered.filter(Boolean);
+    }
+
     if (activeRecipients.length === 0) {
       console.log(`SMS not sent: No active recipients for alert type ${alertData.type}`);
       return;
@@ -153,6 +171,142 @@ async function sendAlertSms(alertData: {
     await Promise.allSettled(sendPromises);
   } catch (err) {
     console.error("SMS sending error:", err);
+  }
+}
+
+/**
+ * Send a personal SMS to a specific phone number (for shift reminders to employees)
+ */
+async function sendPersonalSms(toPhone: string, message: string) {
+  try {
+    const [apiKey, fromNumberRaw] = await Promise.all([
+      storage.getSetting("quo_api_key"),
+      storage.getSetting("quo_from_number"),
+    ]);
+    if (!apiKey || !fromNumberRaw) return;
+
+    const fromNumber = formatPhoneE164(fromNumberRaw);
+    const toNumber = formatPhoneE164(toPhone);
+
+    // Resolve userId with caching
+    let userId: string | undefined;
+    if (cachedUserId && Date.now() < cachedUserId.expiresAt) {
+      userId = cachedUserId.value;
+    } else {
+      const phoneNumbersRes = await fetch("https://api.openphone.com/v1/phone-numbers", {
+        headers: { Authorization: apiKey },
+      });
+      if (phoneNumbersRes.ok) {
+        const phoneData = await phoneNumbersRes.json();
+        const matchingNumber = phoneData.data?.find((pn: any) => {
+          const formatted = formatPhoneE164(pn.formattedNumber || pn.phoneNumber || "");
+          return formatted === fromNumber;
+        });
+        userId = matchingNumber?.users?.[0]?.id;
+      }
+      cachedUserId = { value: userId, expiresAt: Date.now() + USER_ID_CACHE_TTL_MS };
+    }
+
+    const body: any = { content: message, from: fromNumber, to: [toNumber] };
+    if (userId) body.userId = userId;
+
+    const sendRes = await fetch("https://api.openphone.com/v1/messages", {
+      method: "POST",
+      headers: { Authorization: apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (sendRes.ok) {
+      console.log(`Personal SMS sent to ${toNumber}`);
+    } else {
+      const errText = await sendRes.text();
+      console.error(`Personal SMS failed for ${toNumber}: ${sendRes.status} ${errText}`);
+    }
+  } catch (err) {
+    console.error("Personal SMS error:", err);
+  }
+}
+
+/**
+ * Check for employees who haven't submitted start-of-shift cash counts
+ * and send them a reminder text if their first appointment was 15+ minutes ago.
+ * Only runs for locations with shift_reminders_enabled setting.
+ */
+async function checkShiftReminders() {
+  try {
+    const enabled = await storage.getSetting("shift_reminders_enabled");
+    if (enabled !== "true") return;
+
+    const mappedLocations = await storage.getBoulevardMappedLocations();
+    const now = new Date();
+
+    // Check per-location enable setting
+    const enabledLocationsSetting = await storage.getSetting("shift_reminders_locations");
+    const enabledLocationIds = enabledLocationsSetting
+      ? new Set(enabledLocationsSetting.split(",").map(id => parseInt(id.trim())).filter(Boolean))
+      : null; // null means all locations
+
+    for (const loc of mappedLocations) {
+      if (!loc.boulevardLocationId) continue;
+      if (enabledLocationIds && !enabledLocationIds.has(loc.id)) continue;
+
+      // Get today's start in this location's timezone
+      const tz = loc.timezone || "America/Chicago";
+      const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz }); // YYYY-MM-DD
+      const todayStart = new Date(todayStr + "T00:00:00");
+
+      let appointments;
+      try {
+        appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId, now);
+      } catch (e) {
+        console.warn(`Shift reminder: failed to fetch appointments for ${loc.name}:`, e);
+        continue;
+      }
+
+      // Group by staff — find earliest appointment startAt per staff member
+      const staffFirstAppt = new Map<string, Date>();
+      for (const appt of appointments) {
+        if (appt.state === "CANCELLED") continue;
+        const startAt = new Date(appt.startAt);
+        if (startAt.toLocaleDateString("en-CA", { timeZone: tz }) !== todayStr) continue;
+
+        for (const svc of appt.appointmentServices) {
+          const staffId = svc.staff?.id;
+          if (!staffId) continue;
+          const current = staffFirstAppt.get(staffId);
+          if (!current || startAt < current) {
+            staffFirstAppt.set(staffId, startAt);
+          }
+        }
+      }
+
+      for (const [staffBoulevardId, firstApptTime] of staffFirstAppt) {
+        const reminderTime = new Date(firstApptTime.getTime() + 15 * 60 * 1000);
+        if (now < reminderTime) continue; // Not yet 15 min past first appointment
+
+        const esth = await storage.getEstheticianByBoulevardId(staffBoulevardId);
+        if (!esth || !esth.active || !esth.phone) continue;
+
+        const hasCount = await storage.hasStartShiftToday(esth.id, loc.id, todayStart);
+        if (hasCount) continue;
+
+        const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "late_start", todayStart);
+        if (alreadySent) continue;
+
+        await sendPersonalSms(
+          esth.phone,
+          `Hi ${esth.name.split(" ")[0]}, please submit your start-of-shift cash count. Count your drawer and submit via the Cash Control app.`
+        );
+        await storage.createShiftReminder({
+          estheticianId: esth.id,
+          locationId: loc.id,
+          reminderType: "late_start",
+          appointmentDate: firstApptTime,
+        });
+        console.log(`Shift reminder sent to ${esth.name} at ${loc.name}`);
+      }
+    }
+  } catch (err) {
+    console.error("Shift reminder check error:", err);
   }
 }
 
@@ -280,9 +434,8 @@ async function syncStaffFromBoulevard() {
   // Fetch all staff with their location assignments in one pass
   const allStaff = await boulevard.fetchAllStaffWithLocations();
 
-  // Filter to only active estheticians assigned to our mapped locations
+  // Filter to estheticians assigned to our mapped locations (include "No Access" so we can deactivate them)
   const relevantStaff = allStaff.filter(s =>
-    s.active &&
     s.role?.name === "Aesthetician" &&
     s.locations.some(loc => blvdLocationIds.has(loc.id))
   );
@@ -292,9 +445,13 @@ async function syncStaffFromBoulevard() {
 
   for (const s of relevantStaff) {
     const name = `${s.firstName} ${s.lastName}`.trim() || s.displayName;
+    const isActive = s.appRole?.name !== "No Access";
     await storage.upsertEstheticianFromBoulevard({
       name,
       boulevardStaffId: s.id,
+      phone: s.mobilePhone || null,
+      email: s.email || null,
+      active: isActive,
     });
     allSeenStaffIds.push(s.id);
 
@@ -363,6 +520,8 @@ async function startBoulevardAutoSync() {
       }
       // Also sync staff
       await syncStaffFromBoulevard();
+      // Check for missing shift count reminders
+      await checkShiftReminders();
     } catch (err) {
       console.error("Boulevard auto-sync error:", err);
     }
@@ -699,6 +858,7 @@ export async function registerRoutes(
 
         sendAlertSms({
           type: "start_mismatch",
+          marketName: loc?.marketName || null,
           staffName: esth?.name || null,
           locationName: loc?.name || null,
           containerName: container?.name || null,
@@ -757,6 +917,7 @@ export async function registerRoutes(
 
         sendAlertSms({
           type: "missing_receipt",
+          marketName: loc?.marketName || null,
           staffName: esth?.name || null,
           locationName: loc?.name || null,
           containerName: container?.name || null,
@@ -778,6 +939,7 @@ export async function registerRoutes(
 
         sendAlertSms({
           type: "receipt_submitted",
+          marketName: loc?.marketName || null,
           staffName: esth?.name || null,
           locationName: loc?.name || null,
           containerName: container?.name || null,
@@ -1020,6 +1182,7 @@ export async function registerRoutes(
 
         sendAlertSms({
           type: "collection_mismatch",
+          marketName: loc?.marketName || null,
           staffName: collectorName,
           locationName: loc?.name || null,
           containerName: container?.name || null,
@@ -1296,6 +1459,25 @@ export async function registerRoutes(
     }
   });
 
+  // Admin User Market Assignments
+  app.get("/api/admin/users/:id/markets", requireAdmin, async (req, res) => {
+    try {
+      const marketIds = await storage.getAdminUserMarkets(parseInt(req.params.id));
+      res.json({ marketIds });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/users/:id/markets", requireAdmin, async (req, res) => {
+    try {
+      await storage.setAdminUserMarkets(parseInt(req.params.id), req.body.marketIds || []);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // Alert Recipients
   app.get("/api/admin/alert-recipients", requireAdmin, async (_req, res) => {
     try {
@@ -1393,6 +1575,7 @@ async function checkMissingEndShifts() {
 
     sendAlertSms({
       type: "missing_end_shift",
+      marketName: startShift.marketName || null,
       staffName: startShift.estheticianName || null,
       locationName: startShift.locationName || null,
       containerName: startShift.containerName || null,

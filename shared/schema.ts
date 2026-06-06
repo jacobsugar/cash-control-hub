@@ -44,6 +44,8 @@ export const estheticians = pgTable("estheticians", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   name: text("name").notNull(),
   active: boolean("active").default(true).notNull(),
+  phone: text("phone"),
+  email: text("email"),
   boulevardStaffId: text("boulevard_staff_id").unique(),
   lastSyncedAt: timestamp("last_synced_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -127,11 +129,19 @@ export const adminUsers = pgTable("admin_users", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const adminUserMarkets = pgTable("admin_user_markets", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  adminUserId: integer("admin_user_id").notNull().references(() => adminUsers.id),
+  marketId: integer("market_id").notNull().references(() => markets.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const alertRecipients = pgTable("alert_recipients", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   phoneNumber: text("phone_number").notNull(),
   name: text("name"),
   active: boolean("active").default(true).notNull(),
+  adminUserId: integer("admin_user_id").references(() => adminUsers.id),
   // Per-alert-type notification toggles (all default to true)
   notifyStartMismatch: boolean("notify_start_mismatch").default(true).notNull(),
   notifyEndMismatch: boolean("notify_end_mismatch").default(true).notNull(),
@@ -146,6 +156,15 @@ export const appSettings = pgTable("app_settings", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   key: text("key").notNull().unique(),
   value: text("value").notNull(),
+});
+
+export const shiftReminders = pgTable("shift_reminders", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  estheticianId: integer("esthetician_id").notNull().references(() => estheticians.id),
+  locationId: integer("location_id").notNull().references(() => locations.id),
+  reminderType: text("reminder_type").notNull(),
+  appointmentDate: timestamp("appointment_date").notNull(),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
 });
 
 export const boulevardSyncTypeEnum = pgEnum("boulevard_sync_type", ["auto", "manual", "count"]);
@@ -175,6 +194,8 @@ export const insertAlertSchema = createInsertSchema(alerts).omit({ id: true, cre
 export const insertCashCollectionSchema = createInsertSchema(cashCollections).omit({ id: true, createdAt: true });
 export const insertAdminUserSchema = createInsertSchema(adminUsers).omit({ id: true, createdAt: true });
 export const insertAlertRecipientSchema = createInsertSchema(alertRecipients).omit({ id: true, createdAt: true });
+export const insertAdminUserMarketSchema = createInsertSchema(adminUserMarkets).omit({ id: true, createdAt: true });
+export const insertShiftReminderSchema = createInsertSchema(shiftReminders).omit({ id: true, sentAt: true });
 export const insertAppSettingSchema = createInsertSchema(appSettings).omit({ id: true });
 export const insertBoulevardSyncHistorySchema = createInsertSchema(boulevardSyncHistory).omit({ id: true });
 
@@ -190,6 +211,8 @@ export type InsertAlert = z.infer<typeof insertAlertSchema>;
 export type InsertCashCollection = z.infer<typeof insertCashCollectionSchema>;
 export type InsertAdminUser = z.infer<typeof insertAdminUserSchema>;
 export type InsertAlertRecipient = z.infer<typeof insertAlertRecipientSchema>;
+export type InsertAdminUserMarket = z.infer<typeof insertAdminUserMarketSchema>;
+export type InsertShiftReminder = z.infer<typeof insertShiftReminderSchema>;
 export type InsertAppSetting = z.infer<typeof insertAppSettingSchema>;
 
 // Select types
@@ -204,6 +227,8 @@ export type Alert = typeof alerts.$inferSelect;
 export type CashCollection = typeof cashCollections.$inferSelect;
 export type AdminUser = typeof adminUsers.$inferSelect;
 export type AlertRecipient = typeof alertRecipients.$inferSelect;
+export type AdminUserMarket = typeof adminUserMarkets.$inferSelect;
+export type ShiftReminder = typeof shiftReminders.$inferSelect;
 export type AppSetting = typeof appSettings.$inferSelect;
 export type BoulevardSyncHistory = typeof boulevardSyncHistory.$inferSelect;
 export type InsertBoulevardSyncHistory = z.infer<typeof insertBoulevardSyncHistorySchema>;

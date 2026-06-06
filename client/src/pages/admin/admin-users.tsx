@@ -4,15 +4,65 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Shield, Plus, Trash2, Check, X, Info } from "lucide-react";
-import type { AdminUser } from "@shared/schema";
+import { Shield, Plus, Trash2, Check, X, Info, ChevronDown, ChevronUp, MapPin } from "lucide-react";
+import type { AdminUser, Market } from "@shared/schema";
 import { useAdminAuth } from "@/hooks/use-admin-auth";
+
+function MarketAssignment({ userId }: { userId: number }) {
+  const { toast } = useToast();
+  const { data: markets } = useQuery<Market[]>({ queryKey: ["/api/markets"] });
+  const { data: assignment } = useQuery<{ marketIds: number[] }>({
+    queryKey: [`/api/admin/users/${userId}/markets`],
+  });
+
+  const mutation = useMutation({
+    mutationFn: async (marketIds: number[]) => {
+      await apiRequest("PUT", `/api/admin/users/${userId}/markets`, { marketIds });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/admin/users/${userId}/markets`] });
+      toast({ title: "Market assignments updated" });
+    },
+  });
+
+  if (!markets || !assignment) return null;
+  const assigned = new Set(assignment.marketIds);
+
+  return (
+    <div className="mt-3 pt-3 border-t">
+      <div className="flex items-center gap-2 mb-2">
+        <MapPin className="h-3 w-3 text-muted-foreground" />
+        <p className="text-xs font-medium text-muted-foreground">Market Assignments (alerts only for these markets)</p>
+      </div>
+      <div className="flex gap-3 flex-wrap">
+        {markets.map((m) => (
+          <label key={m.id} className="flex items-center gap-1.5 text-sm">
+            <Checkbox
+              checked={assigned.has(m.id)}
+              onCheckedChange={(checked) => {
+                const next = new Set(assigned);
+                if (checked) next.add(m.id);
+                else next.delete(m.id);
+                mutation.mutate(Array.from(next));
+              }}
+            />
+            {m.name}
+          </label>
+        ))}
+      </div>
+      {assigned.size === 0 && (
+        <p className="text-xs text-muted-foreground mt-1">No markets selected — will receive alerts for all markets</p>
+      )}
+    </div>
+  );
+}
 
 export default function AdminUsersPage() {
   const { toast } = useToast();
@@ -22,6 +72,7 @@ export default function AdminUsersPage() {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState("manager");
+  const [expandedUser, setExpandedUser] = useState<number | null>(null);
 
   const { data: users, isLoading } = useQuery<AdminUser[]>({
     queryKey: ["/api/admin/users"],
@@ -137,32 +188,48 @@ export default function AdminUsersPage() {
         <div className="space-y-2">
           {users.map((u) => (
             <Card key={u.id}>
-              <CardContent className="py-3 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10">
-                    <Shield className="h-4 w-4 text-primary" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-medium">{u.name || u.email}</p>
-                      <Badge variant={u.role === "owner" ? "default" : "secondary"}>
-                        {u.role}
-                      </Badge>
+              <CardContent className="py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10">
+                      <Shield className="h-4 w-4 text-primary" />
                     </div>
-                    <p className="text-sm text-muted-foreground" data-testid={`text-admin-email-${u.id}`}>{u.email}</p>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium">{u.name || u.email}</p>
+                        <Badge variant={u.role === "owner" ? "default" : "secondary"}>
+                          {u.role}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground" data-testid={`text-admin-email-${u.id}`}>{u.email}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {u.role === "manager" && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => setExpandedUser(expandedUser === u.id ? null : u.id)}
+                      >
+                        {expandedUser === u.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </Button>
+                    )}
+                    {isOwner && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => {
+                          if (confirm("Remove this admin?")) deleteMutation.mutate(u.id);
+                        }}
+                        data-testid={`button-delete-admin-${u.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
-                {isOwner && (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => {
-                      if (confirm("Remove this admin?")) deleteMutation.mutate(u.id);
-                    }}
-                    data-testid={`button-delete-admin-${u.id}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                {expandedUser === u.id && u.role === "manager" && (
+                  <MarketAssignment userId={u.id} />
                 )}
               </CardContent>
             </Card>

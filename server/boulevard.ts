@@ -233,7 +233,10 @@ export async function fetchCashOrdersForLocation(
 export interface BoulevardStaffWithLocations extends BoulevardStaff {
   locations: { id: string; name: string }[];
   role: { name: string } | null;
+  appRole: { name: string } | null;
   active: boolean;
+  mobilePhone: string | null;
+  email: string | null;
 }
 
 /**
@@ -251,7 +254,9 @@ export async function fetchAllStaffWithLocations(): Promise<BoulevardStaffWithLo
           edges {
             node {
               id firstName lastName displayName active
+              mobilePhone email
               role { name }
+              appRole { name }
               locations { id name }
             }
           }
@@ -273,6 +278,45 @@ export async function fetchAllStaffWithLocations(): Promise<BoulevardStaffWithLo
   }
 
   return staff;
+}
+
+export interface BoulevardAppointment {
+  id: string;
+  startAt: string;
+  endAt: string;
+  state: string;
+  appointmentServices: { staff: { id: string; firstName: string; lastName: string } }[];
+}
+
+/**
+ * Fetch appointments for a location on a given date
+ */
+export async function fetchAppointmentsForLocation(
+  locationId: string,
+  date: Date
+): Promise<BoulevardAppointment[]> {
+  const startOfDay = new Date(date);
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(date);
+  endOfDay.setHours(23, 59, 59, 999);
+
+  return fetchAllPages<BoulevardAppointment>(
+    `query($locationId: ID!, $after: String) {
+      appointments(first: 50, locationId: $locationId, after: $after) {
+        edges {
+          node {
+            id startAt endAt state
+            appointmentServices {
+              staff { id firstName lastName }
+            }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }`,
+    { locationId },
+    "appointments"
+  );
 }
 
 export function isConfigured(): boolean {
