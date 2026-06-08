@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { DollarSign, ArrowRight, AlertTriangle, CheckCircle2, Clock, Shield } from "lucide-react";
+import { DollarSign, ArrowRight, AlertTriangle, CheckCircle2, Clock, Shield, Flag } from "lucide-react";
 import helloSugarLogo from "@/assets/hello-sugar-logo.png";
 import type { Esthetician, Location, Container, Market } from "@shared/schema";
 
@@ -219,6 +219,13 @@ export default function CountPage() {
               >
                 Upload a Receipt
               </Button>
+              <Button
+                variant="outline"
+                onClick={() => navigate(locationIdParam ? `/report/${locationIdParam}` : "/report")}
+                data-testid="button-report-issue"
+              >
+                Report an Issue
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -246,6 +253,15 @@ export default function CountPage() {
             >
               <Receipt className="h-4 w-4 mr-1" />
               Receipt
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(locationIdParam ? `/report/${locationIdParam}` : "/report")}
+              data-testid="button-goto-report"
+            >
+              <Flag className="h-4 w-4 mr-1" />
+              Report
             </Button>
             <Button
               variant="outline"

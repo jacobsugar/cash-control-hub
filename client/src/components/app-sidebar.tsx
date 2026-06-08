@@ -13,6 +13,7 @@ import {
   Shield,
   Settings,
   Terminal,
+  Flag,
 } from "lucide-react";
 import {
   Sidebar,
@@ -35,6 +36,7 @@ const mainItems = [
   { title: "Receipts", url: "/admin/receipts", icon: Receipt },
   { title: "Alerts", url: "/admin/alerts", icon: Bell },
   { title: "Collections", url: "/admin/collections", icon: Wallet },
+  { title: "Reports", url: "/admin/cleanliness-reports", icon: Flag },
 ];
 
 const dataItems = [

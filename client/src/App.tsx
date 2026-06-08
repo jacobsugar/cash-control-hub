@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import NotFound from "@/pages/not-found";
 import CountPage from "@/pages/count";
 import ReceiptUploadPage from "@/pages/receipt-upload";
+import ReportPage from "@/pages/report";
 import AdminLayout from "@/pages/admin/layout";
 import AdminLoginPage from "@/pages/admin/login";
 import AdminDashboard from "@/pages/admin/dashboard";
@@ -22,6 +23,7 @@ import RecipientsPage from "@/pages/admin/recipients";
 import AdminUsersPage from "@/pages/admin/admin-users";
 import SettingsPage from "@/pages/admin/settings";
 import LogsPage from "@/pages/admin/logs";
+import CleanlinessReportsPage from "@/pages/admin/cleanliness-reports";
 import { useAdminAuth } from "@/hooks/use-admin-auth";
 import { Loader2 } from "lucide-react";
 
@@ -56,6 +58,7 @@ function AdminRouter() {
         <Route path="/admin/recipients" component={RecipientsPage} />
         <Route path="/admin/users" component={AdminUsersPage} />
         <Route path="/admin/settings" component={SettingsPage} />
+        <Route path="/admin/cleanliness-reports" component={CleanlinessReportsPage} />
         <Route path="/admin/logs" component={LogsPage} />
         <Route component={NotFound} />
       </Switch>
@@ -68,6 +71,8 @@ function Router() {
     <Switch>
       <Route path="/count/:locationId" component={CountPage} />
       <Route path="/receipt/:locationId" component={ReceiptUploadPage} />
+      <Route path="/report/:locationId" component={ReportPage} />
+      <Route path="/report" component={ReportPage} />
       <Route path="/admin" component={AdminRouter} />
       <Route path="/admin/:rest*" component={AdminRouter} />
       <Route path="/" component={AdminRouter} />

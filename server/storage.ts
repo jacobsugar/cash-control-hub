@@ -5,13 +5,16 @@ import {
   markets, locations, containers, estheticians, estheticianLocations, shiftCounts, receipts,
   boulevardTransactions, alerts, cashCollections, adminUsers, alertRecipients, appSettings,
   boulevardSyncHistory, adminUserMarkets, shiftReminders,
+  cleanlinessReports, cleanlinessReportPhotos,
   type InsertMarket, type InsertLocation, type InsertContainer, type InsertEsthetician,
   type InsertShiftCount, type InsertReceipt, type InsertBoulevardTransaction,
   type InsertAlert, type InsertCashCollection, type InsertAdminUser,
   type InsertAlertRecipient, type InsertAppSetting, type InsertBoulevardSyncHistory,
+  type InsertCleanlinessReport, type InsertCleanlinessReportPhoto,
   type Market, type Location, type Container, type Esthetician, type ShiftCount,
   type Receipt, type BoulevardTransaction, type Alert, type CashCollection,
   type AdminUser, type AlertRecipient, type AppSetting, type BoulevardSyncHistory as BoulevardSyncHistoryType,
+  type CleanlinessReport, type CleanlinessReportPhoto,
 } from "@shared/schema";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
@@ -120,6 +123,16 @@ export interface IStorage {
   getLastSyncForLocation(locationId: number): Promise<BoulevardSyncHistoryType | undefined>;
   getLastSyncOverall(): Promise<BoulevardSyncHistoryType | undefined>;
   getRecentSyncStats(): Promise<{ totalImported: number; lastSyncAt: string | null }>;
+
+  // Cleanliness Reports
+  createCleanlinessReport(data: InsertCleanlinessReport): Promise<CleanlinessReport>;
+  createCleanlinessReportPhoto(data: InsertCleanlinessReportPhoto): Promise<CleanlinessReportPhoto>;
+  getCleanlinessReports(): Promise<any[]>;
+  getCleanlinessReport(id: number): Promise<any>;
+  resolveCleanlinessReport(id: number, data: { resolutionNote: string; resolvedByAdminId: number }): Promise<void>;
+  getUnresolvedReportsOlderThan(hours: number): Promise<CleanlinessReport[]>;
+  getInfractionCounts(): Promise<{ estheticianId: number; name: string; count: number }[]>;
+  getPreviousEstheticianAtLocation(locationId: number): Promise<{ id: number; name: string } | null>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -939,6 +952,144 @@ export class DatabaseStorage implements IStorage {
       totalImported: parseInt(result?.totalImported || "0"),
       lastSyncAt: result?.lastSyncAt || null,
     };
+  }
+  // Cleanliness Reports
+  async createCleanlinessReport(data: InsertCleanlinessReport) {
+    const [report] = await db.insert(cleanlinessReports).values(data).returning();
+    return report;
+  }
+
+  async createCleanlinessReportPhoto(data: InsertCleanlinessReportPhoto) {
+    const [photo] = await db.insert(cleanlinessReportPhotos).values(data).returning();
+    return photo;
+  }
+
+  async getCleanlinessReports() {
+    const reporterEsth = db.select({ id: estheticians.id, name: estheticians.name }).from(estheticians).as("reporter");
+    const prevEsth = db.select({ id: estheticians.id, name: estheticians.name }).from(estheticians).as("prev_esth");
+
+    const result = await db
+      .select({
+        id: cleanlinessReports.id,
+        locationId: cleanlinessReports.locationId,
+        reportedByEstheticianId: cleanlinessReports.reportedByEstheticianId,
+        previousEstheticianId: cleanlinessReports.previousEstheticianId,
+        note: cleanlinessReports.note,
+        status: cleanlinessReports.status,
+        resolutionNote: cleanlinessReports.resolutionNote,
+        resolvedAt: cleanlinessReports.resolvedAt,
+        resolvedByAdminId: cleanlinessReports.resolvedByAdminId,
+        escalatedAt: cleanlinessReports.escalatedAt,
+        createdAt: cleanlinessReports.createdAt,
+        locationName: locations.name,
+        marketName: markets.name,
+        reporterName: reporterEsth.name,
+        previousEstheticianName: prevEsth.name,
+        photoCount: sql<string>`(SELECT COUNT(*) FROM cleanliness_report_photos WHERE report_id = ${cleanlinessReports.id})`,
+      })
+      .from(cleanlinessReports)
+      .innerJoin(locations, eq(cleanlinessReports.locationId, locations.id))
+      .innerJoin(markets, eq(locations.marketId, markets.id))
+      .innerJoin(reporterEsth, eq(cleanlinessReports.reportedByEstheticianId, reporterEsth.id))
+      .leftJoin(prevEsth, eq(cleanlinessReports.previousEstheticianId, prevEsth.id))
+      .orderBy(desc(cleanlinessReports.createdAt));
+    return result;
+  }
+
+  async getCleanlinessReport(id: number) {
+    const reporterEsth = db.select({ id: estheticians.id, name: estheticians.name }).from(estheticians).as("reporter");
+    const prevEsth = db.select({ id: estheticians.id, name: estheticians.name }).from(estheticians).as("prev_esth");
+
+    const [report] = await db
+      .select({
+        id: cleanlinessReports.id,
+        locationId: cleanlinessReports.locationId,
+        reportedByEstheticianId: cleanlinessReports.reportedByEstheticianId,
+        previousEstheticianId: cleanlinessReports.previousEstheticianId,
+        note: cleanlinessReports.note,
+        status: cleanlinessReports.status,
+        resolutionNote: cleanlinessReports.resolutionNote,
+        resolvedAt: cleanlinessReports.resolvedAt,
+        resolvedByAdminId: cleanlinessReports.resolvedByAdminId,
+        escalatedAt: cleanlinessReports.escalatedAt,
+        createdAt: cleanlinessReports.createdAt,
+        locationName: locations.name,
+        marketName: markets.name,
+        reporterName: reporterEsth.name,
+        previousEstheticianName: prevEsth.name,
+      })
+      .from(cleanlinessReports)
+      .innerJoin(locations, eq(cleanlinessReports.locationId, locations.id))
+      .innerJoin(markets, eq(locations.marketId, markets.id))
+      .innerJoin(reporterEsth, eq(cleanlinessReports.reportedByEstheticianId, reporterEsth.id))
+      .leftJoin(prevEsth, eq(cleanlinessReports.previousEstheticianId, prevEsth.id))
+      .where(eq(cleanlinessReports.id, id));
+
+    if (!report) return null;
+
+    const photos = await db
+      .select()
+      .from(cleanlinessReportPhotos)
+      .where(eq(cleanlinessReportPhotos.reportId, id))
+      .orderBy(cleanlinessReportPhotos.createdAt);
+
+    return { ...report, photos };
+  }
+
+  async resolveCleanlinessReport(id: number, data: { resolutionNote: string; resolvedByAdminId: number }) {
+    await db.update(cleanlinessReports).set({
+      status: "resolved" as any,
+      resolutionNote: data.resolutionNote,
+      resolvedByAdminId: data.resolvedByAdminId,
+      resolvedAt: new Date(),
+    }).where(eq(cleanlinessReports.id, id));
+  }
+
+  async getUnresolvedReportsOlderThan(hours: number) {
+    const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
+    return db
+      .select()
+      .from(cleanlinessReports)
+      .where(and(
+        eq(cleanlinessReports.status, "open"),
+        lt(cleanlinessReports.createdAt, cutoff),
+        sql`${cleanlinessReports.escalatedAt} IS NULL`
+      ));
+  }
+
+  async getInfractionCounts() {
+    const result = await db
+      .select({
+        estheticianId: cleanlinessReports.previousEstheticianId,
+        name: estheticians.name,
+        count: sql<string>`COUNT(*)`,
+      })
+      .from(cleanlinessReports)
+      .innerJoin(estheticians, eq(cleanlinessReports.previousEstheticianId, estheticians.id))
+      .where(sql`${cleanlinessReports.previousEstheticianId} IS NOT NULL`)
+      .groupBy(cleanlinessReports.previousEstheticianId, estheticians.name)
+      .orderBy(sql`COUNT(*) DESC`);
+    return result.map(r => ({
+      estheticianId: r.estheticianId!,
+      name: r.name,
+      count: parseInt(r.count),
+    }));
+  }
+
+  async getPreviousEstheticianAtLocation(locationId: number) {
+    const [result] = await db
+      .select({
+        estheticianId: shiftCounts.estheticianId,
+        name: estheticians.name,
+      })
+      .from(shiftCounts)
+      .innerJoin(containers, eq(shiftCounts.containerId, containers.id))
+      .innerJoin(estheticians, eq(shiftCounts.estheticianId, estheticians.id))
+      .where(eq(containers.locationId, locationId))
+      .orderBy(desc(shiftCounts.createdAt))
+      .limit(1);
+    if (!result) return null;
+    return { id: result.estheticianId, name: result.name };
   }
 }
 

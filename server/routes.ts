@@ -1,6 +1,8 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage, db } from "./storage";
+import { cleanlinessReports } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -53,6 +55,10 @@ function buildAlertMessage(alertData: {
       return `CashControl Alert: Missing end-of-shift count at ${loc}${container}. Started by ${staff} but no end count recorded.`;
     case "collection_mismatch":
       return `CashControl Alert: Collection discrepancy at ${loc}${container}. Expected $${alertData.expectedAmount}, collected $${alertData.actualAmount} by ${staff}.${alertData.note ? ` Note: ${alertData.note}` : ""}`;
+    case "cleanliness_report":
+      return `CashControl: Cleanliness issue reported at ${loc} by ${staff}.${alertData.note ? ` Note: ${alertData.note}` : ""}`;
+    case "cleanliness_escalation":
+      return `CashControl ESCALATION: Unresolved cleanliness report at ${loc} (reported by ${staff}) has been open for over 24 hours.${alertData.note ? ` Note: ${alertData.note}` : ""}`;
     default:
       return `CashControl Alert: ${alertData.type} at ${loc}${container}.`;
   }
@@ -93,6 +99,7 @@ async function sendAlertSms(alertData: {
       missing_receipt: "notifyMissingReceipt",
       receipt_submitted: "notifyReceiptSubmitted",
       collection_mismatch: "notifyCollectionMismatch",
+      cleanliness_report: "notifyCleanlinessReport",
     };
     const fieldName = alertTypeToField[alertData.type] || null;
     let activeRecipients = recipients.filter((r: any) =>
@@ -522,6 +529,8 @@ async function startBoulevardAutoSync() {
       await syncStaffFromBoulevard();
       // Check for missing shift count reminders
       await checkShiftReminders();
+      // Check for unresolved cleanliness reports needing escalation
+      await checkUnresolvedCleanlinessReports();
     } catch (err) {
       console.error("Boulevard auto-sync error:", err);
     }
@@ -961,6 +970,67 @@ export async function registerRoutes(
       if (!receipt) return res.status(404).json({ message: "Receipt not found" });
       if (!fs.existsSync(receipt.filePath)) return res.status(404).json({ message: "File not found" });
       res.sendFile(receipt.filePath);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Serve cleanliness report photos
+  app.get("/api/cleanliness-photos/:filename", (req, res) => {
+    const filePath = path.join(uploadDir, req.params.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ message: "File not found" });
+    res.sendFile(filePath);
+  });
+
+  // Create cleanliness report (public - esthetician facing)
+  app.post("/api/cleanliness-reports", upload.array("photos", 10), async (req, res) => {
+    try {
+      const { locationId, reportedByEstheticianId, note } = req.body;
+      if (!locationId || !reportedByEstheticianId || !note) {
+        return res.status(400).json({ message: "locationId, reportedByEstheticianId, and note are required" });
+      }
+
+      const locId = parseInt(locationId);
+      const reporterId = parseInt(reportedByEstheticianId);
+
+      const prev = await storage.getPreviousEstheticianAtLocation(locId);
+      const previousEstheticianId = prev && prev.id !== reporterId ? prev.id : null;
+
+      const report = await storage.createCleanlinessReport({
+        locationId: locId,
+        reportedByEstheticianId: reporterId,
+        previousEstheticianId: previousEstheticianId,
+        note,
+      });
+
+      const files = (req.files as Express.Multer.File[]) || [];
+      for (const file of files) {
+        let photoTakenAt: Date | null = null;
+        try {
+          photoTakenAt = fs.statSync(file.path).mtime;
+        } catch { /* fallback: null */ }
+        await storage.createCleanlinessReportPhoto({
+          reportId: report.id,
+          filePath: file.path,
+          fileName: file.originalname,
+          photoTakenAt,
+        });
+      }
+
+      const [loc, reporter] = await Promise.all([
+        storage.getLocation(locId),
+        storage.getEsthetician(reporterId),
+      ]);
+
+      sendAlertSms({
+        type: "cleanliness_report",
+        marketName: loc?.marketName || null,
+        staffName: reporter?.name || null,
+        locationName: loc?.name || null,
+        note,
+      });
+
+      res.json(report);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -1548,7 +1618,124 @@ export async function registerRoutes(
     res.json(getRecentLogs(n));
   });
 
+  // Admin Cleanliness Reports
+  app.get("/api/admin/cleanliness-reports", requireAdmin, async (_req, res) => {
+    try {
+      const data = await storage.getCleanlinessReports();
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/cleanliness-reports/infractions", requireAdmin, async (_req, res) => {
+    try {
+      const data = await storage.getInfractionCounts();
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/cleanliness-reports/:id", requireAdmin, async (req, res) => {
+    try {
+      const report = await storage.getCleanlinessReport(parseInt(req.params.id));
+      if (!report) return res.status(404).json({ message: "Report not found" });
+      res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.patch("/api/admin/cleanliness-reports/:id/resolve", requireAdmin, async (req, res) => {
+    try {
+      const { resolutionNote } = req.body;
+      if (!resolutionNote || !resolutionNote.trim()) {
+        return res.status(400).json({ message: "Resolution note is required" });
+      }
+      const adminEmail = req.session.adminEmail!;
+      const admin = await storage.getAdminByEmail(adminEmail);
+      if (!admin) return res.status(401).json({ message: "Admin not found" });
+
+      await storage.resolveCleanlinessReport(parseInt(req.params.id), {
+        resolutionNote: resolutionNote.trim(),
+        resolvedByAdminId: admin.id,
+      });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   return httpServer;
+}
+
+async function checkUnresolvedCleanlinessReports() {
+  try {
+    const unresolvedReports = await storage.getUnresolvedReportsOlderThan(24);
+    for (const report of unresolvedReports) {
+      const [loc, reporter] = await Promise.all([
+        storage.getLocation(report.locationId),
+        storage.getEsthetician(report.reportedByEstheticianId),
+      ]);
+
+      // Send escalation to owners only by using a special type
+      // We reuse sendAlertSms but the market filtering + owner check handles it
+      const [apiKey, fromNumberRaw, recipients, allMarkets] = await Promise.all([
+        storage.getSetting("quo_api_key"),
+        storage.getSetting("quo_from_number"),
+        storage.getAlertRecipients(),
+        storage.getMarkets(),
+      ]);
+
+      if (apiKey && fromNumberRaw) {
+        const marketId = loc?.marketName ? allMarkets.find(m => m.name === loc.marketName)?.id : undefined;
+        const ownerRecipients = [];
+        for (const r of recipients) {
+          if (!r.active) continue;
+          if (!r.adminUserId) continue;
+          const admin = await storage.getAdminUser(r.adminUserId);
+          if (!admin || admin.role !== "owner") continue;
+          if (marketId) {
+            const assignedMarkets = await storage.getAdminUserMarkets(r.adminUserId);
+            if (assignedMarkets.length > 0 && !assignedMarkets.includes(marketId)) continue;
+          }
+          ownerRecipients.push(r);
+        }
+
+        if (ownerRecipients.length > 0) {
+          const message = buildAlertMessage({
+            type: "cleanliness_escalation",
+            staffName: reporter?.name || null,
+            locationName: loc?.name || null,
+            note: report.note,
+          });
+          const fromNumber = formatPhoneE164(fromNumberRaw);
+
+          for (const recipient of ownerRecipients) {
+            const toNumber = formatPhoneE164(recipient.phoneNumber);
+            try {
+              await fetch("https://api.openphone.com/v1/messages", {
+                method: "POST",
+                headers: { Authorization: apiKey, "Content-Type": "application/json" },
+                body: JSON.stringify({ content: message, from: fromNumber, to: [toNumber] }),
+              });
+              console.log(`Escalation SMS sent to ${recipient.name} (${toNumber})`);
+            } catch (err) {
+              console.error(`Escalation SMS failed for ${recipient.name}:`, err);
+            }
+          }
+        }
+      }
+
+      // Mark as escalated
+      await db.update(cleanlinessReports)
+        .set({ escalatedAt: new Date() })
+        .where(eq(cleanlinessReports.id, report.id));
+    }
+  } catch (err) {
+    console.error("Cleanliness escalation check error:", err);
+  }
 }
 
 async function checkMissingEndShifts() {

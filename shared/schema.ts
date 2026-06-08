@@ -13,6 +13,7 @@ export const alertTypeEnum = pgEnum("alert_type", [
   "receipt_submitted",
   "collection_mismatch",
 ]);
+export const cleanlinessReportStatusEnum = pgEnum("cleanliness_report_status", ["open", "resolved"]);
 export const alertStatusEnum = pgEnum("alert_status", ["active", "resolved", "acknowledged"]);
 
 export const markets = pgTable("markets", {
@@ -149,6 +150,7 @@ export const alertRecipients = pgTable("alert_recipients", {
   notifyMissingReceipt: boolean("notify_missing_receipt").default(true).notNull(),
   notifyReceiptSubmitted: boolean("notify_receipt_submitted").default(true).notNull(),
   notifyCollectionMismatch: boolean("notify_collection_mismatch").default(true).notNull(),
+  notifyCleanlinessReport: boolean("notify_cleanliness_report").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -165,6 +167,29 @@ export const shiftReminders = pgTable("shift_reminders", {
   reminderType: text("reminder_type").notNull(),
   appointmentDate: timestamp("appointment_date").notNull(),
   sentAt: timestamp("sent_at").defaultNow().notNull(),
+});
+
+export const cleanlinessReports = pgTable("cleanliness_reports", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  locationId: integer("location_id").notNull().references(() => locations.id),
+  reportedByEstheticianId: integer("reported_by_esthetician_id").notNull().references(() => estheticians.id),
+  previousEstheticianId: integer("previous_esthetician_id").references(() => estheticians.id),
+  note: text("note").notNull(),
+  status: cleanlinessReportStatusEnum("status").default("open").notNull(),
+  resolutionNote: text("resolution_note"),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedByAdminId: integer("resolved_by_admin_id").references(() => adminUsers.id),
+  escalatedAt: timestamp("escalated_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const cleanlinessReportPhotos = pgTable("cleanliness_report_photos", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  reportId: integer("report_id").notNull().references(() => cleanlinessReports.id),
+  filePath: text("file_path").notNull(),
+  fileName: text("file_name").notNull(),
+  photoTakenAt: timestamp("photo_taken_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const boulevardSyncTypeEnum = pgEnum("boulevard_sync_type", ["auto", "manual", "count"]);
@@ -198,6 +223,8 @@ export const insertAdminUserMarketSchema = createInsertSchema(adminUserMarkets).
 export const insertShiftReminderSchema = createInsertSchema(shiftReminders).omit({ id: true, sentAt: true });
 export const insertAppSettingSchema = createInsertSchema(appSettings).omit({ id: true });
 export const insertBoulevardSyncHistorySchema = createInsertSchema(boulevardSyncHistory).omit({ id: true });
+export const insertCleanlinessReportSchema = createInsertSchema(cleanlinessReports).omit({ id: true, createdAt: true });
+export const insertCleanlinessReportPhotoSchema = createInsertSchema(cleanlinessReportPhotos).omit({ id: true, createdAt: true });
 
 // Insert types
 export type InsertMarket = z.infer<typeof insertMarketSchema>;
@@ -214,6 +241,8 @@ export type InsertAlertRecipient = z.infer<typeof insertAlertRecipientSchema>;
 export type InsertAdminUserMarket = z.infer<typeof insertAdminUserMarketSchema>;
 export type InsertShiftReminder = z.infer<typeof insertShiftReminderSchema>;
 export type InsertAppSetting = z.infer<typeof insertAppSettingSchema>;
+export type InsertCleanlinessReport = z.infer<typeof insertCleanlinessReportSchema>;
+export type InsertCleanlinessReportPhoto = z.infer<typeof insertCleanlinessReportPhotoSchema>;
 
 // Select types
 export type Market = typeof markets.$inferSelect;
@@ -232,3 +261,5 @@ export type ShiftReminder = typeof shiftReminders.$inferSelect;
 export type AppSetting = typeof appSettings.$inferSelect;
 export type BoulevardSyncHistory = typeof boulevardSyncHistory.$inferSelect;
 export type InsertBoulevardSyncHistory = z.infer<typeof insertBoulevardSyncHistorySchema>;
+export type CleanlinessReport = typeof cleanlinessReports.$inferSelect;
+export type CleanlinessReportPhoto = typeof cleanlinessReportPhotos.$inferSelect;
