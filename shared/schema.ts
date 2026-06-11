@@ -38,6 +38,7 @@ export const containers = pgTable("containers", {
   name: text("name").notNull(),
   locationId: integer("location_id").notNull().references(() => locations.id),
   currentBalance: decimal("current_balance", { precision: 10, scale: 2 }).default("0.00").notNull(),
+  balanceUpdatedAt: timestamp("balance_updated_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

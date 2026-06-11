@@ -254,6 +254,7 @@ export class DatabaseStorage implements IStorage {
         name: containers.name,
         locationId: containers.locationId,
         currentBalance: containers.currentBalance,
+        balanceUpdatedAt: containers.balanceUpdatedAt,
         locationName: locations.name,
         marketName: markets.name,
       })
@@ -279,7 +280,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateContainerBalance(id: number, balance: string) {
-    await db.update(containers).set({ currentBalance: balance }).where(eq(containers.id, id));
+    await db.update(containers).set({ currentBalance: balance, balanceUpdatedAt: new Date() }).where(eq(containers.id, id));
   }
 
   async deleteContainer(id: number) {
@@ -798,7 +799,7 @@ export class DatabaseStorage implements IStorage {
           sinceDate = new Date(lastCollection.created_at);
         } else {
           baseAmount = lastShift?.counted_amount || c.currentBalance || "0.00";
-          sinceDate = lastShift?.created_at ? new Date(lastShift.created_at) : undefined;
+          sinceDate = lastShift?.created_at ? new Date(lastShift.created_at) : (c.balanceUpdatedAt ? new Date(c.balanceUpdatedAt) : undefined);
         }
 
         const boulevardCash = await this.getBoulevardCashForLocation(c.locationId, sinceDate);
