@@ -141,12 +141,23 @@ export default function CollectionsPage() {
                   <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     type="number"
-                    step="0.01"
+                    step="1"
                     min="0"
                     className="pl-9"
-                    placeholder="0.00"
+                    placeholder="0"
                     value={collectedAmount}
-                    onChange={(e) => setCollectedAmount(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.includes(".")) {
+                        toast({
+                          title: "Whole dollars only",
+                          description: "Don't include change — round down to the nearest whole dollar.",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+                      setCollectedAmount(val);
+                    }}
                     data-testid="input-collected-amount"
                   />
                 </div>

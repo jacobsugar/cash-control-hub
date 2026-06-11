@@ -421,17 +421,28 @@ export default function CountPage() {
                       <Input
                         id="counted"
                         type="number"
-                        step="0.01"
+                        step="1"
                         min="0"
-                        placeholder="0.00"
+                        placeholder="0"
                         className="pl-9 text-lg"
                         value={countedAmount}
-                        onChange={(e) => setCountedAmount(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val.includes(".")) {
+                            toast({
+                              title: "Whole dollars only",
+                              description: "Don't include change — round down to the nearest whole dollar.",
+                              variant: "destructive",
+                            });
+                            return;
+                          }
+                          setCountedAmount(val);
+                        }}
                         data-testid="input-counted-amount"
                       />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Enter the exact amount you counted before seeing the expected total.
+                      Enter the whole dollar amount only — do not include change.
                     </p>
                   </div>
                 </CardContent>
@@ -506,7 +517,7 @@ export default function CountPage() {
                                 <p className="text-sm font-medium text-destructive">Discrepancy Detected</p>
                                 <p className="text-xs text-muted-foreground mt-1">
                                   Expected ${expectedAmount} but you counted ${countedAmount}.
-                                  Difference: ${(parseFloat(countedAmount) - parseFloat(expectedAmount || "0")).toFixed(2)}
+                                  Difference: ${Math.round(parseFloat(countedAmount) - parseFloat(expectedAmount || "0"))}
                                 </p>
                               </div>
                             </div>

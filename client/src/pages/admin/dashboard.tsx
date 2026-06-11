@@ -15,6 +15,8 @@ import {
   ArrowRight,
   RefreshCw,
   Database,
+  DollarSign,
+  MapPin,
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -195,6 +197,58 @@ export default function AdminDashboard() {
         </CardContent>
       </Card>
 
+      {/* Cash Totals */}
+      {!isLoading && stats?.cashPositions?.length ? (() => {
+        const positions = stats.cashPositions;
+        const totalCash = positions.reduce((sum, p) => sum + parseFloat(p.expectedCash || p.currentBalance || "0"), 0);
+        const vegasTotal = positions.filter(p => p.marketName === "Las Vegas").reduce((sum, p) => sum + parseFloat(p.expectedCash || p.currentBalance || "0"), 0);
+        const austinTotal = positions.filter(p => p.marketName === "Austin").reduce((sum, p) => sum + parseFloat(p.expectedCash || p.currentBalance || "0"), 0);
+        const fmt = (n: number) => "$" + Math.round(n).toLocaleString();
+        return (
+          <div className="grid grid-cols-3 gap-3">
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Total Cash</p>
+                    <p className="text-2xl font-bold" data-testid="stat-total-cash">{fmt(totalCash)}</p>
+                  </div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
+                    <DollarSign className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Las Vegas</p>
+                    <p className="text-2xl font-bold" data-testid="stat-vegas-cash">{fmt(vegasTotal)}</p>
+                  </div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
+                    <MapPin className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Austin</p>
+                    <p className="text-2xl font-bold" data-testid="stat-austin-cash">{fmt(austinTotal)}</p>
+                  </div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
+                    <MapPin className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        );
+      })() : null}
+
       <div className="grid lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
@@ -282,7 +336,7 @@ export default function AdminDashboard() {
                       </p>
                     </div>
                     <p className="text-lg font-bold whitespace-nowrap">
-                      ${parseFloat(pos.expectedCash || pos.currentBalance).toFixed(2)}
+                      ${Math.round(parseFloat(pos.expectedCash || pos.currentBalance)).toLocaleString()}
                     </p>
                   </div>
                 ))}

@@ -833,6 +833,11 @@ export async function registerRoutes(
     try {
       const { containerId, estheticianId, type, countedAmount, expectedAmount, discrepancyNote } = req.body;
 
+      // Enforce whole dollar amounts only
+      if (countedAmount && countedAmount.toString().includes(".")) {
+        return res.status(400).json({ message: "Cash counts must be whole dollar amounts — do not include change." });
+      }
+
       const shiftCount = await storage.createShiftCount({
         containerId,
         estheticianId,
