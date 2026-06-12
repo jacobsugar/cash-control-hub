@@ -116,6 +116,7 @@ export interface IStorage {
   hasShiftReminderBeenSent(estheticianId: number, locationId: number, reminderType: string, since: Date): Promise<boolean>;
   createShiftReminder(data: { estheticianId: number; locationId: number; reminderType: string; appointmentDate: Date }): Promise<any>;
   hasStartShiftToday(estheticianId: number, locationId: number, since: Date): Promise<boolean>;
+  hasEndShiftToday(estheticianId: number, locationId: number, since: Date): Promise<boolean>;
 
   // Boulevard Sync History
   createSyncHistoryEntry(data: InsertBoulevardSyncHistory): Promise<BoulevardSyncHistoryType>;
@@ -186,8 +187,11 @@ export class DatabaseStorage implements IStorage {
         id: locations.id,
         name: locations.name,
         boulevardLocationId: locations.boulevardLocationId,
+        timezone: locations.timezone,
+        marketName: markets.name,
       })
       .from(locations)
+      .innerJoin(markets, eq(locations.marketId, markets.id))
       .where(sql`${locations.boulevardLocationId} IS NOT NULL`);
     return result;
   }
@@ -905,6 +909,19 @@ export class DatabaseStorage implements IStorage {
         eq(shiftCounts.estheticianId, estheticianId),
         eq(containers.locationId, locationId),
         eq(shiftCounts.type, "start"),
+        gte(shiftCounts.createdAt, since),
+      ))
+      .limit(1);
+    return !!row;
+  }
+
+  async hasEndShiftToday(estheticianId: number, locationId: number, since: Date) {
+    const [row] = await db.select({ id: shiftCounts.id }).from(shiftCounts)
+      .innerJoin(containers, eq(shiftCounts.containerId, containers.id))
+      .where(and(
+        eq(shiftCounts.estheticianId, estheticianId),
+        eq(containers.locationId, locationId),
+        eq(shiftCounts.type, "end"),
         gte(shiftCounts.createdAt, since),
       ))
       .limit(1);

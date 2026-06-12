@@ -529,6 +529,8 @@ async function startBoulevardAutoSync() {
       await syncStaffFromBoulevard();
       // Check for missing shift count reminders
       await checkShiftReminders();
+      // Check for missing end-of-shift counts (based on Boulevard appointments)
+      await checkMissingEndShifts();
       // Check for unresolved cleanliness reports needing escalation
       await checkUnresolvedCleanlinessReports();
     } catch (err) {
@@ -710,32 +712,8 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
-  // Schedule missing end-of-shift check daily at 9 PM Pacific Time
-  function scheduleDailyCheck() {
-    const now = new Date();
-    const pt = new Date(now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
-    const target = new Date(pt);
-    target.setHours(21, 0, 0, 0);
-    if (pt >= target) {
-      target.setDate(target.getDate() + 1);
-    }
-    const ptOffset = pt.getTime() - now.getTime();
-    const msUntilTarget = target.getTime() - pt.getTime();
-
-    setTimeout(async () => {
-      try {
-        await checkMissingEndShifts();
-      } catch (err) {
-        console.error("Missing end shift check error:", err);
-      }
-      scheduleDailyCheck();
-    }, msUntilTarget);
-
-    const hours = Math.floor(msUntilTarget / 3600000);
-    const mins = Math.floor((msUntilTarget % 3600000) / 60000);
-    console.log(`Next missing-end-shift check scheduled in ${hours}h ${mins}m (9 PM PT)`);
-  }
-  scheduleDailyCheck();
+  // Missing end-shift checks now run on the same interval as Boulevard sync
+  // (via checkMissingEndShifts called from the sync interval)
 
   // ===== PUBLIC ROUTES (esthetician-facing, no auth) =====
 
@@ -836,6 +814,49 @@ export async function registerRoutes(
       // Enforce whole dollar amounts only
       if (countedAmount && countedAmount.toString().includes(".")) {
         return res.status(400).json({ message: "Cash counts must be whole dollar amounts — do not include change." });
+      }
+
+      // Enforce 60-minute window after last appointment for end-of-shift counts
+      if (type === "end") {
+        try {
+          const [container, esth] = await Promise.all([
+            storage.getContainer(containerId),
+            storage.getEsthetician(estheticianId),
+          ]);
+          if (container && esth?.boulevardStaffId) {
+            const loc = await storage.getLocation(container.locationId);
+            if (loc?.boulevardLocationId) {
+              const appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId, new Date());
+              const tz = loc.timezone || "America/Chicago";
+              const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+
+              let lastApptEnd: Date | null = null;
+              for (const appt of appointments) {
+                if (appt.state === "CANCELLED") continue;
+                const startDate = new Date(appt.startAt).toLocaleDateString("en-CA", { timeZone: tz });
+                if (startDate !== todayStr) continue;
+                for (const svc of appt.appointmentServices) {
+                  if (svc.staff?.id === esth.boulevardStaffId) {
+                    const endAt = new Date(appt.endAt);
+                    if (!lastApptEnd || endAt > lastApptEnd) lastApptEnd = endAt;
+                  }
+                }
+              }
+
+              if (lastApptEnd) {
+                const deadline = new Date(lastApptEnd.getTime() + 60 * 60 * 1000);
+                if (new Date() > deadline) {
+                  return res.status(400).json({
+                    message: `The end-of-shift count window has closed. Your last appointment ended at ${lastApptEnd.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })} and you had 60 minutes to submit your count. Please contact a manager.`,
+                  });
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // Don't block the count if Boulevard check fails
+          console.warn("End-shift window check failed:", e);
+        }
       }
 
       const shiftCount = await storage.createShiftCount({
@@ -1775,34 +1796,100 @@ async function checkUnresolvedCleanlinessReports() {
   }
 }
 
+/**
+ * Check for missing end-of-shift counts based on Boulevard appointment data.
+ * Triggers 60 minutes after an esthetician's last appointment ends for the day.
+ */
 async function checkMissingEndShifts() {
-  const maxShiftHours = 12;
-  const cutoff = new Date(Date.now() - maxShiftHours * 60 * 60 * 1000);
+  try {
+    const mappedLocations = await storage.getBoulevardMappedLocations();
+    const now = new Date();
 
-  // Single efficient query: get open start shifts older than cutoff
-  const openShifts = await storage.getOpenStartShifts(cutoff);
+    for (const loc of mappedLocations) {
+      if (!loc.boulevardLocationId) continue;
 
-  for (const startShift of openShifts) {
-    // Check if alert already exists for this shift (single targeted query)
-    const alreadyAlerted = await storage.hasAlertForShiftCount(startShift.id, "missing_end_shift");
-    if (alreadyAlerted) continue;
+      const tz = loc.timezone || "America/Chicago";
+      const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz });
+      const todayStart = new Date(todayStr + "T00:00:00");
 
-    await storage.createAlert({
-      type: "missing_end_shift",
-      staffName: startShift.estheticianName || null,
-      marketName: startShift.marketName || null,
-      locationName: startShift.locationName || null,
-      containerName: startShift.containerName || null,
-      shiftCountId: startShift.id,
-      note: `No end-of-shift count submitted within ${maxShiftHours} hours of start`,
-    });
+      let appointments;
+      try {
+        appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId, now);
+      } catch (e) {
+        console.warn(`Missing end-shift check: failed to fetch appointments for ${loc.name}:`, e);
+        continue;
+      }
 
-    sendAlertSms({
-      type: "missing_end_shift",
-      marketName: startShift.marketName || null,
-      staffName: startShift.estheticianName || null,
-      locationName: startShift.locationName || null,
-      containerName: startShift.containerName || null,
-    });
+      // Find each staff member's last appointment endAt for today
+      const staffLastApptEnd = new Map<string, Date>();
+      for (const appt of appointments) {
+        if (appt.state === "CANCELLED") continue;
+        const endAt = new Date(appt.endAt);
+        if (endAt.toLocaleDateString("en-CA", { timeZone: tz }) !== todayStr &&
+            new Date(appt.startAt).toLocaleDateString("en-CA", { timeZone: tz }) !== todayStr) continue;
+
+        for (const svc of appt.appointmentServices) {
+          const staffId = svc.staff?.id;
+          if (!staffId) continue;
+          const current = staffLastApptEnd.get(staffId);
+          if (!current || endAt > current) {
+            staffLastApptEnd.set(staffId, endAt);
+          }
+        }
+      }
+
+      for (const [staffBoulevardId, lastApptEnd] of staffLastApptEnd) {
+        // Only trigger 60 minutes after their last appointment ended
+        const deadlineTime = new Date(lastApptEnd.getTime() + 60 * 60 * 1000);
+        if (now < deadlineTime) continue;
+
+        const esth = await storage.getEstheticianByBoulevardId(staffBoulevardId);
+        if (!esth || !esth.active) continue;
+
+        // Check if they already submitted an end count today
+        const hasEndCount = await storage.hasEndShiftToday(esth.id, loc.id, todayStart);
+        if (hasEndCount) continue;
+
+        // Check if we already sent a reminder for this
+        const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "missing_end", todayStart);
+        if (alreadySent) continue;
+
+        // Send reminder SMS to the esthetician
+        if (esth.phone) {
+          await sendPersonalSms(
+            esth.phone,
+            `Hi ${esth.name.split(" ")[0]}, your last appointment ended and you haven't submitted your end-of-shift cash count yet. Please count your cash and submit via the Cash Control app.`
+          );
+        }
+
+        // Create alert for managers
+        await storage.createAlert({
+          type: "missing_end_shift",
+          staffName: esth.name,
+          marketName: loc.marketName || null,
+          locationName: loc.name || null,
+          note: `No end-of-shift count submitted. Last appointment ended at ${lastApptEnd.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })}.`,
+        });
+
+        sendAlertSms({
+          type: "missing_end_shift",
+          marketName: loc.marketName || null,
+          staffName: esth.name,
+          locationName: loc.name || null,
+        });
+
+        // Record that we sent this reminder
+        await storage.createShiftReminder({
+          estheticianId: esth.id,
+          locationId: loc.id,
+          reminderType: "missing_end",
+          appointmentDate: lastApptEnd,
+        });
+
+        console.log(`Missing end-shift alert for ${esth.name} at ${loc.name} (last appt ended ${lastApptEnd.toISOString()})`);
+      }
+    }
+  } catch (err) {
+    console.error("Missing end-shift check error:", err);
   }
 }
