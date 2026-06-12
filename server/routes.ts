@@ -806,6 +806,25 @@ export async function registerRoutes(
     }
   });
 
+  // Check if esthetician has a start count today (for end-of-shift validation)
+  app.get("/api/shift-counts/check-start", async (req, res) => {
+    try {
+      const estheticianId = parseInt(req.query.estheticianId as string);
+      const locationId = parseInt(req.query.locationId as string);
+      if (!estheticianId || !locationId) return res.status(400).json({ message: "Missing params" });
+
+      const loc = await storage.getLocation(locationId);
+      const tz = loc?.timezone || "America/Chicago";
+      const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+      const todayStart = new Date(todayStr + "T00:00:00");
+
+      const hasStart = await storage.hasStartShiftToday(estheticianId, locationId, todayStart);
+      res.json({ hasStart });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // Submit shift count
   app.post("/api/shift-counts", async (req, res) => {
     try {
@@ -814,6 +833,22 @@ export async function registerRoutes(
       // Enforce whole dollar amounts only
       if (countedAmount && countedAmount.toString().includes(".")) {
         return res.status(400).json({ message: "Cash counts must be whole dollar amounts — do not include change." });
+      }
+
+      // Require a start-of-shift count before allowing an end-of-shift count
+      if (type === "end") {
+        const container = await storage.getContainer(containerId);
+        if (container) {
+          const tz = (await storage.getLocation(container.locationId))?.timezone || "America/Chicago";
+          const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+          const todayStart = new Date(todayStr + "T00:00:00");
+          const hasStart = await storage.hasStartShiftToday(estheticianId, container.locationId, todayStart);
+          if (!hasStart) {
+            return res.status(400).json({
+              message: "You must submit a start-of-shift count before submitting an end-of-shift count.",
+            });
+          }
+        }
       }
 
       // Enforce 60-minute window after last appointment for end-of-shift counts
