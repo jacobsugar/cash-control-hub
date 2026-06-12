@@ -1205,6 +1205,15 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/admin/alerts/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteAlert(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // Admin Collections
   app.get("/api/admin/collections", requireAdmin, async (_req, res) => {
     try {
@@ -1666,6 +1675,29 @@ export async function registerRoutes(
         resolutionNote: resolutionNote.trim(),
         resolvedByAdminId: admin.id,
       });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/cleanliness-reports/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteCleanlinessReport(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Adjust container balance (expected amount)
+  app.patch("/api/containers/:id/balance", requireAdmin, async (req, res) => {
+    try {
+      const { balance } = req.body;
+      if (balance === undefined || balance === null) {
+        return res.status(400).json({ message: "Balance is required" });
+      }
+      await storage.updateContainerBalance(parseInt(req.params.id), String(balance));
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

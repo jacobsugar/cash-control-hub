@@ -16,6 +16,7 @@ import {
   Camera,
   AlertTriangle,
   Users,
+  Trash2,
 } from "lucide-react";
 
 interface CleanlinessReportListItem {
@@ -72,6 +73,20 @@ export default function CleanlinessReportsPage() {
   const { data: expandedReport, isLoading: loadingDetail } = useQuery<CleanlinessReportDetail>({
     queryKey: [`/api/admin/cleanliness-reports/${expandedId}`],
     enabled: expandedId !== null,
+  });
+
+  const deleteReportMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/admin/cleanliness-reports/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cleanliness-reports"] });
+      setExpandedId(null);
+      toast({ title: "Report deleted" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
   });
 
   const resolveMutation = useMutation({
@@ -271,6 +286,20 @@ export default function CleanlinessReportsPage() {
                                 </Button>
                               </div>
                             )}
+
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => {
+                                if (confirm("Delete this report? This cannot be undone.")) {
+                                  deleteReportMutation.mutate(report.id);
+                                }
+                              }}
+                              disabled={deleteReportMutation.isPending}
+                            >
+                              <Trash2 className="h-3 w-3 mr-1" />
+                              {deleteReportMutation.isPending ? "Deleting..." : "Delete Report"}
+                            </Button>
                           </div>
                         )}
                       </div>

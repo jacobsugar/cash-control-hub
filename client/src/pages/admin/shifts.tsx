@@ -24,14 +24,38 @@ export default function ShiftsPage() {
     queryKey: ["/api/markets"],
   });
 
-  const filtered = useMemo(() => shifts?.filter((s) => {
+  // Group recounts under their parent count
+  const grouped = useMemo(() => {
+    if (!shifts) return [];
+    const result: (ShiftCountWithDetails & { recounts?: ShiftCountWithDetails[] })[] = [];
+    const sorted = [...shifts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    for (const s of sorted) {
+      if (s.discrepancyNote?.startsWith("[RECOUNT]")) {
+        // Attach to the next non-recount entry for the same container/esthetician/type
+        const parent = result.find(
+          (p) => p.containerId === s.containerId && p.estheticianId === s.estheticianId && p.type === s.type &&
+            !p.discrepancyNote?.startsWith("[RECOUNT]") &&
+            Math.abs(new Date(p.createdAt).getTime() - new Date(s.createdAt).getTime()) < 30 * 60 * 1000
+        );
+        if (parent) {
+          if (!parent.recounts) parent.recounts = [];
+          parent.recounts.push(s);
+          continue;
+        }
+      }
+      result.push({ ...s });
+    }
+    return result;
+  }, [shifts]);
+
+  const filtered = useMemo(() => grouped.filter((s) => {
     if (search && !s.estheticianName.toLowerCase().includes(search.toLowerCase()) &&
         !s.locationName.toLowerCase().includes(search.toLowerCase()) &&
         !s.containerName.toLowerCase().includes(search.toLowerCase())) return false;
     if (marketFilter !== "all" && s.marketName !== marketFilter) return false;
     if (typeFilter !== "all" && s.type !== typeFilter) return false;
     return true;
-  }) || [], [shifts, search, marketFilter, typeFilter]);
+  }), [grouped, search, marketFilter, typeFilter]);
 
   const handleExport = () => {
     const csvContent = [
@@ -155,10 +179,26 @@ export default function ShiftsPage() {
                             {s.type === "start" ? "Start" : "End"}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right font-mono">${s.countedAmount}</TableCell>
+                        <TableCell className="text-right font-mono">
+                          ${s.countedAmount}
+                          {s.recounts && s.recounts.length > 0 && (
+                            <div className="text-xs text-muted-foreground mt-0.5">
+                              {s.recounts.map((r, i) => (
+                                <span key={r.id} className="block text-orange-500">
+                                  1st count: ${r.countedAmount}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell className="text-right font-mono">{s.expectedAmount ? `$${s.expectedAmount}` : "-"}</TableCell>
                         <TableCell>
-                          {hasVariance ? (
+                          {s.recounts && s.recounts.length > 0 ? (
+                            <div className="flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3 text-orange-500" />
+                              <span className="text-xs text-orange-500">Recounted</span>
+                            </div>
+                          ) : hasVariance ? (
                             <div className="flex items-center gap-1">
                               <AlertTriangle className="h-3 w-3 text-destructive" />
                               <span className="text-xs text-destructive">Variance</span>

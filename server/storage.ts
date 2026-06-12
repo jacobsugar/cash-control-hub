@@ -77,6 +77,7 @@ export interface IStorage {
   getActiveAlertCounts(): Promise<{ variances: number; missingEndShifts: number }>;
   createAlert(data: InsertAlert): Promise<Alert>;
   updateAlertStatus(id: number, status: string): Promise<void>;
+  deleteAlert(id: number): Promise<void>;
   hasAlertForShiftCount(shiftCountId: number, type: string): Promise<boolean>;
 
   // Cash Collections
@@ -130,6 +131,7 @@ export interface IStorage {
   getCleanlinessReports(): Promise<any[]>;
   getCleanlinessReport(id: number): Promise<any>;
   resolveCleanlinessReport(id: number, data: { resolutionNote: string; resolvedByAdminId: number }): Promise<void>;
+  deleteCleanlinessReport(id: number): Promise<void>;
   getUnresolvedReportsOlderThan(hours: number): Promise<CleanlinessReport[]>;
   getInfractionCounts(): Promise<{ estheticianId: number; name: string; count: number }[]>;
   getPreviousEstheticianAtLocation(locationId: number): Promise<{ id: number; name: string } | null>;
@@ -616,6 +618,10 @@ export class DatabaseStorage implements IStorage {
     await db.update(alerts).set({ status: status as any }).where(eq(alerts.id, id));
   }
 
+  async deleteAlert(id: number) {
+    await db.delete(alerts).where(eq(alerts.id, id));
+  }
+
   // Collections
   async getCollections() {
     const result = await db
@@ -1044,6 +1050,11 @@ export class DatabaseStorage implements IStorage {
       resolvedByAdminId: data.resolvedByAdminId,
       resolvedAt: new Date(),
     }).where(eq(cleanlinessReports.id, id));
+  }
+
+  async deleteCleanlinessReport(id: number) {
+    await db.delete(cleanlinessReportPhotos).where(eq(cleanlinessReportPhotos.reportId, id));
+    await db.delete(cleanlinessReports).where(eq(cleanlinessReports.id, id));
   }
 
   async getUnresolvedReportsOlderThan(hours: number) {

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState, useMemo } from "react";
-import { Bell, Search, CheckCircle2, AlertTriangle, Clock, Receipt } from "lucide-react";
+import { Bell, Search, CheckCircle2, AlertTriangle, Clock, Receipt, Trash2 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { AlertWithDetails } from "@/lib/types";
@@ -57,6 +57,17 @@ export default function AlertsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/alerts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/dashboard"] });
       toast({ title: "Alert acknowledged" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/admin/alerts/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/alerts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/dashboard"] });
+      toast({ title: "Alert deleted" });
     },
   });
 
@@ -176,17 +187,31 @@ export default function AlertsPage() {
                           <p className="text-xs">{new Date(alert.createdAt).toLocaleString()}</p>
                         </div>
                       </div>
-                      {alert.status === "active" && (
+                      <div className="flex gap-1 shrink-0">
+                        {alert.status === "active" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => acknowledgeMutation.mutate(alert.id)}
+                            disabled={acknowledgeMutation.isPending}
+                            data-testid={`button-ack-${alert.id}`}
+                          >
+                            Acknowledge
+                          </Button>
+                        )}
                         <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => acknowledgeMutation.mutate(alert.id)}
-                          disabled={acknowledgeMutation.isPending}
-                          data-testid={`button-ack-${alert.id}`}
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            if (confirm("Delete this alert?")) {
+                              deleteMutation.mutate(alert.id);
+                            }
+                          }}
                         >
-                          Acknowledge
+                          <Trash2 className="h-4 w-4" />
                         </Button>
-                      )}
+                      </div>
                     </div>
                   </div>
                 );

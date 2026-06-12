@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Building2, Plus, Trash2, Box, ExternalLink, Copy, Pencil, Check, X } from "lucide-react";
+import { Building2, Plus, Trash2, Box, ExternalLink, Copy, Pencil, Check, X, DollarSign } from "lucide-react";
 import type { Market, Location, Container } from "@shared/schema";
 
 interface LocationWithDetails extends Location {
@@ -131,6 +131,24 @@ export default function LocationsPage() {
 
   const [editingContainerId, setEditingContainerId] = useState<number | null>(null);
   const [editContainerName, setEditContainerName] = useState("");
+
+  const [editingBalanceId, setEditingBalanceId] = useState<number | null>(null);
+  const [editBalance, setEditBalance] = useState("");
+
+  const updateBalanceMutation = useMutation({
+    mutationFn: async ({ id, balance }: { id: number; balance: string }) => {
+      await apiRequest("PATCH", `/api/containers/${id}/balance`, { balance });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/locations-with-containers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/dashboard"] });
+      setEditingBalanceId(null);
+      toast({ title: "Balance updated" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
 
   const startEditLocation = (loc: LocationWithDetails) => {
     setEditingLocId(loc.id);
@@ -470,9 +488,49 @@ export default function LocationsPage() {
                             <div className="flex items-center gap-2">
                               <Box className="h-3 w-3 text-muted-foreground" />
                               <span className="text-sm">{c.name}</span>
-                              <span className="text-xs text-muted-foreground font-mono">
-                                ${parseFloat(c.currentBalance).toFixed(2)}
-                              </span>
+                              {editingBalanceId === c.id ? (
+                                <div className="flex items-center gap-1">
+                                  <DollarSign className="h-3 w-3 text-muted-foreground" />
+                                  <Input
+                                    type="number"
+                                    step="1"
+                                    min="0"
+                                    value={editBalance}
+                                    onChange={(e) => setEditBalance(e.target.value)}
+                                    className="h-6 w-24 text-xs font-mono"
+                                    autoFocus
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" && editBalance) {
+                                        updateBalanceMutation.mutate({ id: c.id, balance: editBalance });
+                                      } else if (e.key === "Escape") {
+                                        setEditingBalanceId(null);
+                                      }
+                                    }}
+                                  />
+                                  <Button size="icon" variant="ghost" className="h-6 w-6"
+                                    onClick={() => updateBalanceMutation.mutate({ id: c.id, balance: editBalance })}
+                                    disabled={!editBalance || updateBalanceMutation.isPending}
+                                  >
+                                    <Check className="h-3 w-3" />
+                                  </Button>
+                                  <Button size="icon" variant="ghost" className="h-6 w-6"
+                                    onClick={() => setEditingBalanceId(null)}
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <button
+                                  className="text-xs text-muted-foreground font-mono hover:text-foreground hover:underline"
+                                  onClick={() => {
+                                    setEditingBalanceId(c.id);
+                                    setEditBalance(String(Math.round(parseFloat(c.currentBalance))));
+                                  }}
+                                  title="Click to adjust balance"
+                                >
+                                  ${Math.round(parseFloat(c.currentBalance)).toLocaleString()}
+                                </button>
+                              )}
                             </div>
                             <div className="flex gap-0.5">
                               <Button size="icon" variant="ghost" className="h-7 w-7"
