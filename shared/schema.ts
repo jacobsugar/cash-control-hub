@@ -68,6 +68,7 @@ export const shiftCounts = pgTable("shift_counts", {
   countedAmount: decimal("counted_amount", { precision: 10, scale: 2 }).notNull(),
   expectedAmount: decimal("expected_amount", { precision: 10, scale: 2 }),
   discrepancyNote: text("discrepancy_note"),
+  floatNote: text("float_note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

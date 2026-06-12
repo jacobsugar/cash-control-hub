@@ -28,6 +28,7 @@ export default function CountPage() {
   const [selectedContainer, setSelectedContainer] = useState("");
   const [countedAmount, setCountedAmount] = useState("");
   const [discrepancyNote, setDiscrepancyNote] = useState("");
+  const [floatNote, setFloatNote] = useState("");
   const [priorAmount, setPriorAmount] = useState<string | null>(null);
   const [expectedAmount, setExpectedAmount] = useState<string | null>(null);
 
@@ -74,6 +75,7 @@ export default function CountPage() {
       countedAmount: string;
       expectedAmount: string | null;
       discrepancyNote: string | null;
+      floatNote?: string | null;
     }) => {
       const res = await apiRequest("POST", "/api/shift-counts", data);
       return res.json();
@@ -139,6 +141,7 @@ export default function CountPage() {
     setCountedAmount("");
     setExpectedAmount(null);
     setDiscrepancyNote("");
+    setFloatNote("");
 
     setStep("count");
   };
@@ -178,6 +181,7 @@ export default function CountPage() {
         setCountedAmount("");
         setExpectedAmount(null);
         setDiscrepancyNote("");
+    setFloatNote("");
         toast({ title: "Miscount recorded", description: "Your first count was logged. Please recount the cash." });
       },
     });
@@ -188,6 +192,7 @@ export default function CountPage() {
       toast({ title: "Note required", description: "Please explain the discrepancy before submitting.", variant: "destructive" });
       return;
     }
+    const isFlagship = currentLocation?.type === "flagship";
     submitMutation.mutate({
       containerId: parseInt(selectedContainer),
       estheticianId: parseInt(selectedEsthetician),
@@ -195,6 +200,7 @@ export default function CountPage() {
       countedAmount,
       expectedAmount,
       discrepancyNote: hasMismatch ? discrepancyNote : null,
+      floatNote: isFlagship && shiftType === "end" && floatNote.trim() ? floatNote.trim() : null,
     });
   };
 
@@ -223,6 +229,7 @@ export default function CountPage() {
                   setStep("select");
                   setCountedAmount("");
                   setDiscrepancyNote("");
+    setFloatNote("");
                   setSelectedEsthetician("");
                   if (!locationIdParam) {
                     setSelectedLocation("");
@@ -324,7 +331,7 @@ export default function CountPage() {
                     onClick={() => setShiftType("start")}
                     data-testid="button-shift-start"
                   >
-                    Start of Shift
+                    {currentLocation?.type === "flagship" ? "Start of Day" : "Start of Shift"}
                   </Button>
                   <Button
                     className="flex-1"
@@ -332,7 +339,7 @@ export default function CountPage() {
                     onClick={() => setShiftType("end")}
                     data-testid="button-shift-end"
                   >
-                    End of Shift
+                    {currentLocation?.type === "flagship" ? "End of Day" : "End of Shift"}
                   </Button>
                 </div>
 
@@ -466,6 +473,19 @@ export default function CountPage() {
                       Enter the whole dollar amount only — do not include change.
                     </p>
                   </div>
+
+                  {currentLocation?.type === "flagship" && shiftType === "end" && (
+                    <div className="space-y-2 mt-4 pt-4 border-t">
+                      <Label htmlFor="float-note">Float amount changed? (optional)</Label>
+                      <Textarea
+                        id="float-note"
+                        placeholder="Note any changes to the float amount (default is $20)..."
+                        value={floatNote}
+                        onChange={(e) => setFloatNote(e.target.value)}
+                        rows={2}
+                      />
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ) : (

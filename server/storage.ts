@@ -118,6 +118,8 @@ export interface IStorage {
   createShiftReminder(data: { estheticianId: number; locationId: number; reminderType: string; appointmentDate: Date }): Promise<any>;
   hasStartShiftToday(estheticianId: number, locationId: number, since: Date): Promise<boolean>;
   hasEndShiftToday(estheticianId: number, locationId: number, since: Date): Promise<boolean>;
+  hasLocationStartCountToday(locationId: number, since: Date): Promise<boolean>;
+  hasLocationEndCountToday(locationId: number, since: Date): Promise<boolean>;
 
   // Boulevard Sync History
   createSyncHistoryEntry(data: InsertBoulevardSyncHistory): Promise<BoulevardSyncHistoryType>;
@@ -187,6 +189,7 @@ export class DatabaseStorage implements IStorage {
       .select({
         id: locations.id,
         name: locations.name,
+        type: locations.type,
         boulevardLocationId: locations.boulevardLocationId,
         timezone: locations.timezone,
         marketName: markets.name,
@@ -463,6 +466,7 @@ export class DatabaseStorage implements IStorage {
         countedAmount: shiftCounts.countedAmount,
         expectedAmount: shiftCounts.expectedAmount,
         discrepancyNote: shiftCounts.discrepancyNote,
+        floatNote: shiftCounts.floatNote,
         createdAt: shiftCounts.createdAt,
         containerName: containers.name,
         locationName: locations.name,
@@ -928,6 +932,30 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(containers, eq(shiftCounts.containerId, containers.id))
       .where(and(
         eq(shiftCounts.estheticianId, estheticianId),
+        eq(containers.locationId, locationId),
+        eq(shiftCounts.type, "end"),
+        gte(shiftCounts.createdAt, since),
+      ))
+      .limit(1);
+    return !!row;
+  }
+
+  async hasLocationStartCountToday(locationId: number, since: Date) {
+    const [row] = await db.select({ id: shiftCounts.id }).from(shiftCounts)
+      .innerJoin(containers, eq(shiftCounts.containerId, containers.id))
+      .where(and(
+        eq(containers.locationId, locationId),
+        eq(shiftCounts.type, "start"),
+        gte(shiftCounts.createdAt, since),
+      ))
+      .limit(1);
+    return !!row;
+  }
+
+  async hasLocationEndCountToday(locationId: number, since: Date) {
+    const [row] = await db.select({ id: shiftCounts.id }).from(shiftCounts)
+      .innerJoin(containers, eq(shiftCounts.containerId, containers.id))
+      .where(and(
         eq(containers.locationId, locationId),
         eq(shiftCounts.type, "end"),
         gte(shiftCounts.createdAt, since),

@@ -286,30 +286,76 @@ async function checkShiftReminders() {
         }
       }
 
-      for (const [staffBoulevardId, firstApptTime] of staffFirstAppt) {
-        const reminderTime = new Date(firstApptTime.getTime() + 15 * 60 * 1000);
-        if (now < reminderTime) continue; // Not yet 15 min past first appointment
+      const isFlagship = loc.type === "flagship";
 
-        const esth = await storage.getEstheticianByBoulevardId(staffBoulevardId);
-        if (!esth || !esth.active || !esth.phone) continue;
+      if (isFlagship) {
+        // Flagship: check if anyone submitted a start count today
+        const hasLocationStart = await storage.hasLocationStartCountToday(loc.id, todayStart);
+        if (hasLocationStart) continue;
 
-        const hasCount = await storage.hasStartShiftToday(esth.id, loc.id, todayStart);
-        if (hasCount) continue;
+        // Find the earliest appointment time across all staff
+        let earliestTime: Date | null = null;
+        for (const [, time] of staffFirstAppt) {
+          if (!earliestTime || time < earliestTime) earliestTime = time;
+        }
+        if (!earliestTime) continue;
+        const reminderTime = new Date(earliestTime.getTime() + 15 * 60 * 1000);
+        if (now < reminderTime) continue;
 
-        const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "late_start", todayStart);
-        if (alreadySent) continue;
+        // Find all staff with the earliest appointment (could be tied)
+        const earliestStaffIds: string[] = [];
+        for (const [staffId, time] of staffFirstAppt) {
+          if (time.getTime() === earliestTime.getTime()) {
+            earliestStaffIds.push(staffId);
+          }
+        }
 
-        await sendPersonalSms(
-          esth.phone,
-          `Hi ${esth.name.split(" ")[0]}, please submit your start-of-shift cash count. Count your drawer and submit via the Cash Control app.`
-        );
-        await storage.createShiftReminder({
-          estheticianId: esth.id,
-          locationId: loc.id,
-          reminderType: "late_start",
-          appointmentDate: firstApptTime,
-        });
-        console.log(`Shift reminder sent to ${esth.name} at ${loc.name}`);
+        for (const staffBoulevardId of earliestStaffIds) {
+          const esth = await storage.getEstheticianByBoulevardId(staffBoulevardId);
+          if (!esth || !esth.active || !esth.phone) continue;
+
+          const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "late_start", todayStart);
+          if (alreadySent) continue;
+
+          await sendPersonalSms(
+            esth.phone,
+            `Hi ${esth.name.split(" ")[0]}, please submit the start-of-day cash count for ${loc.name}. Count the till and submit via CashControl.`
+          );
+          await storage.createShiftReminder({
+            estheticianId: esth.id,
+            locationId: loc.id,
+            reminderType: "late_start",
+            appointmentDate: earliestTime,
+          });
+          console.log(`Flagship start reminder sent to ${esth.name} at ${loc.name}`);
+        }
+      } else {
+        // Suite: per-esthetician check
+        for (const [staffBoulevardId, firstApptTime] of staffFirstAppt) {
+          const reminderTime = new Date(firstApptTime.getTime() + 15 * 60 * 1000);
+          if (now < reminderTime) continue;
+
+          const esth = await storage.getEstheticianByBoulevardId(staffBoulevardId);
+          if (!esth || !esth.active || !esth.phone) continue;
+
+          const hasCount = await storage.hasStartShiftToday(esth.id, loc.id, todayStart);
+          if (hasCount) continue;
+
+          const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "late_start", todayStart);
+          if (alreadySent) continue;
+
+          await sendPersonalSms(
+            esth.phone,
+            `Hi ${esth.name.split(" ")[0]}, please submit your start-of-shift cash count. Count your drawer and submit via CashControl.`
+          );
+          await storage.createShiftReminder({
+            estheticianId: esth.id,
+            locationId: loc.id,
+            reminderType: "late_start",
+            appointmentDate: firstApptTime,
+          });
+          console.log(`Shift reminder sent to ${esth.name} at ${loc.name}`);
+        }
       }
     }
   } catch (err) {
@@ -806,7 +852,7 @@ export async function registerRoutes(
     }
   });
 
-  // Check if esthetician has a start count today (for end-of-shift validation)
+  // Check if a start count exists today (for end-of-shift validation)
   app.get("/api/shift-counts/check-start", async (req, res) => {
     try {
       const estheticianId = parseInt(req.query.estheticianId as string);
@@ -818,7 +864,11 @@ export async function registerRoutes(
       const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
       const todayStart = new Date(todayStr + "T00:00:00");
 
-      const hasStart = await storage.hasStartShiftToday(estheticianId, locationId, todayStart);
+      // Flagship: check if anyone at the location submitted a start count
+      // Suite: check if this specific esthetician did
+      const hasStart = loc?.type === "flagship"
+        ? await storage.hasLocationStartCountToday(locationId, todayStart)
+        : await storage.hasStartShiftToday(estheticianId, locationId, todayStart);
       res.json({ hasStart });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -835,45 +885,65 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Cash counts must be whole dollar amounts — do not include change." });
       }
 
-      // Require a start-of-shift count before allowing an end-of-shift count
+      // End-of-shift validations
       if (type === "end") {
         const container = await storage.getContainer(containerId);
         if (container) {
-          const tz = (await storage.getLocation(container.locationId))?.timezone || "America/Chicago";
+          const loc = await storage.getLocation(container.locationId);
+          const tz = loc?.timezone || "America/Chicago";
           const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
           const todayStart = new Date(todayStr + "T00:00:00");
-          const hasStart = await storage.hasStartShiftToday(estheticianId, container.locationId, todayStart);
-          if (!hasStart) {
-            return res.status(400).json({
-              message: "You must submit a start-of-shift count before submitting an end-of-shift count.",
-            });
-          }
-        }
-      }
+          const isFlagship = loc?.type === "flagship";
 
-      // Enforce 60-minute window after last appointment for end-of-shift counts
-      if (type === "end") {
-        try {
-          const [container, esth] = await Promise.all([
-            storage.getContainer(containerId),
-            storage.getEsthetician(estheticianId),
-          ]);
-          if (container && esth?.boulevardStaffId) {
-            const loc = await storage.getLocation(container.locationId);
+          // Require a start count before end count
+          // Flagship: anyone at the location can have done it
+          // Suite: the same esthetician must have done it
+          if (isFlagship) {
+            const hasStart = await storage.hasLocationStartCountToday(container.locationId, todayStart);
+            if (!hasStart) {
+              return res.status(400).json({
+                message: "A start-of-day count must be submitted before the end-of-day count.",
+              });
+            }
+            // Flagship: only one end count per day
+            const hasEnd = await storage.hasLocationEndCountToday(container.locationId, todayStart);
+            if (hasEnd) {
+              return res.status(400).json({
+                message: "An end-of-day count has already been submitted for this location today.",
+              });
+            }
+          } else {
+            const hasStart = await storage.hasStartShiftToday(estheticianId, container.locationId, todayStart);
+            if (!hasStart) {
+              return res.status(400).json({
+                message: "You must submit a start-of-shift count before submitting an end-of-shift count.",
+              });
+            }
+          }
+
+          // Enforce 60-minute window after last appointment
+          try {
             if (loc?.boulevardLocationId) {
+              const esth = await storage.getEsthetician(estheticianId);
               const appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId, new Date());
-              const tz = loc.timezone || "America/Chicago";
-              const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
 
               let lastApptEnd: Date | null = null;
               for (const appt of appointments) {
                 if (appt.state === "CANCELLED") continue;
                 const startDate = new Date(appt.startAt).toLocaleDateString("en-CA", { timeZone: tz });
                 if (startDate !== todayStr) continue;
-                for (const svc of appt.appointmentServices) {
-                  if (svc.staff?.id === esth.boulevardStaffId) {
-                    const endAt = new Date(appt.endAt);
-                    if (!lastApptEnd || endAt > lastApptEnd) lastApptEnd = endAt;
+
+                if (isFlagship) {
+                  // Flagship: check ALL appointments at the location
+                  const endAt = new Date(appt.endAt);
+                  if (!lastApptEnd || endAt > lastApptEnd) lastApptEnd = endAt;
+                } else if (esth?.boulevardStaffId) {
+                  // Suite: check only this esthetician's appointments
+                  for (const svc of appt.appointmentServices) {
+                    if (svc.staff?.id === esth.boulevardStaffId) {
+                      const endAt = new Date(appt.endAt);
+                      if (!lastApptEnd || endAt > lastApptEnd) lastApptEnd = endAt;
+                    }
                   }
                 }
               }
@@ -882,18 +952,37 @@ export async function registerRoutes(
                 const deadline = new Date(lastApptEnd.getTime() + 60 * 60 * 1000);
                 if (new Date() > deadline) {
                   return res.status(400).json({
-                    message: `The end-of-shift count window has closed. Your last appointment ended at ${lastApptEnd.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })} and you had 60 minutes to submit your count. Please contact a manager.`,
+                    message: `The end-of-${isFlagship ? "day" : "shift"} count window has closed. The last appointment ended at ${lastApptEnd.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })} and you had 60 minutes to submit. Please contact a manager.`,
                   });
                 }
               }
             }
+          } catch (e) {
+            console.warn("End-shift window check failed:", e);
           }
-        } catch (e) {
-          // Don't block the count if Boulevard check fails
-          console.warn("End-shift window check failed:", e);
         }
       }
 
+      // Flagship start count: only one per day
+      if (type === "start") {
+        const container = await storage.getContainer(containerId);
+        if (container) {
+          const loc = await storage.getLocation(container.locationId);
+          if (loc?.type === "flagship") {
+            const tz = loc.timezone || "America/Chicago";
+            const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+            const todayStart = new Date(todayStr + "T00:00:00");
+            const hasStart = await storage.hasLocationStartCountToday(container.locationId, todayStart);
+            if (hasStart) {
+              return res.status(400).json({
+                message: "A start-of-day count has already been submitted for this location today.",
+              });
+            }
+          }
+        }
+      }
+
+      const floatNote = req.body.floatNote || null;
       const shiftCount = await storage.createShiftCount({
         containerId,
         estheticianId,
@@ -901,6 +990,7 @@ export async function registerRoutes(
         countedAmount,
         expectedAmount,
         discrepancyNote,
+        floatNote,
       });
 
       // Update container balance
@@ -1856,6 +1946,7 @@ async function checkMissingEndShifts() {
       const tz = loc.timezone || "America/Chicago";
       const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz });
       const todayStart = new Date(todayStr + "T00:00:00");
+      const isFlagship = loc.type === "flagship";
 
       let appointments;
       try {
@@ -1865,13 +1956,17 @@ async function checkMissingEndShifts() {
         continue;
       }
 
-      // Find each staff member's last appointment endAt for today
+      // Build per-staff last appointment end times for today
       const staffLastApptEnd = new Map<string, Date>();
+      let locationLastApptEnd: Date | null = null;
+
       for (const appt of appointments) {
         if (appt.state === "CANCELLED") continue;
         const endAt = new Date(appt.endAt);
-        if (endAt.toLocaleDateString("en-CA", { timeZone: tz }) !== todayStr &&
-            new Date(appt.startAt).toLocaleDateString("en-CA", { timeZone: tz }) !== todayStr) continue;
+        const startDate = new Date(appt.startAt).toLocaleDateString("en-CA", { timeZone: tz });
+        if (startDate !== todayStr) continue;
+
+        if (!locationLastApptEnd || endAt > locationLastApptEnd) locationLastApptEnd = endAt;
 
         for (const svc of appt.appointmentServices) {
           const staffId = svc.staff?.id;
@@ -1883,31 +1978,92 @@ async function checkMissingEndShifts() {
         }
       }
 
+      if (isFlagship) {
+        // Flagship: one end count per location per day
+        // Alert goes to whoever has the latest appointment(s)
+        if (!locationLastApptEnd) continue;
+        const deadlineTime = new Date(locationLastApptEnd.getTime() + 60 * 60 * 1000);
+        if (now < deadlineTime) continue;
+
+        const hasEndCount = await storage.hasLocationEndCountToday(loc.id, todayStart);
+        if (hasEndCount) continue;
+
+        // Find staff with the latest appointment (could be multiple if tied)
+        const latestStaffIds: string[] = [];
+        for (const [staffId, endTime] of staffLastApptEnd) {
+          if (endTime.getTime() === locationLastApptEnd.getTime()) {
+            latestStaffIds.push(staffId);
+          }
+        }
+
+        for (const staffBoulevardId of latestStaffIds) {
+          const esth = await storage.getEstheticianByBoulevardId(staffBoulevardId);
+          if (!esth || !esth.active) continue;
+
+          const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "missing_end", todayStart);
+          if (alreadySent) continue;
+
+          if (esth.phone) {
+            await sendPersonalSms(
+              esth.phone,
+              `Hi ${esth.name.split(" ")[0]}, the last appointment at ${loc.name} has ended and no end-of-day cash count has been submitted. Please count the till and submit via CashControl.`
+            );
+          }
+
+          await storage.createShiftReminder({
+            estheticianId: esth.id,
+            locationId: loc.id,
+            reminderType: "missing_end",
+            appointmentDate: locationLastApptEnd,
+          });
+          console.log(`Missing end-of-day alert for ${esth.name} at ${loc.name} (flagship)`);
+        }
+
+        // One alert for the location
+        const staffNames = [];
+        for (const sid of latestStaffIds) {
+          const e = await storage.getEstheticianByBoulevardId(sid);
+          if (e) staffNames.push(e.name);
+        }
+        await storage.createAlert({
+          type: "missing_end_shift",
+          staffName: staffNames.join(", ") || null,
+          marketName: loc.marketName || null,
+          locationName: loc.name || null,
+          note: `No end-of-day count submitted at flagship. Last appointment ended at ${locationLastApptEnd.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })}.`,
+        });
+
+        sendAlertSms({
+          type: "missing_end_shift",
+          marketName: loc.marketName || null,
+          staffName: staffNames.join(", ") || null,
+          locationName: loc.name || null,
+        });
+
+        continue;
+      }
+
+      // Suite locations: per-esthetician checks
       for (const [staffBoulevardId, lastApptEnd] of staffLastApptEnd) {
-        // Only trigger 60 minutes after their last appointment ended
         const deadlineTime = new Date(lastApptEnd.getTime() + 60 * 60 * 1000);
         if (now < deadlineTime) continue;
 
         const esth = await storage.getEstheticianByBoulevardId(staffBoulevardId);
         if (!esth || !esth.active) continue;
 
-        // Check if they already submitted an end count today
         const hasEndCount = await storage.hasEndShiftToday(esth.id, loc.id, todayStart);
         if (hasEndCount) continue;
 
-        // Check if we already sent a reminder for this
         const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "missing_end", todayStart);
         if (alreadySent) continue;
 
-        // Send reminder SMS to the esthetician
         if (esth.phone) {
           await sendPersonalSms(
             esth.phone,
-            `Hi ${esth.name.split(" ")[0]}, your last appointment ended and you haven't submitted your end-of-shift cash count yet. Please count your cash and submit via the Cash Control app.`
+            `Hi ${esth.name.split(" ")[0]}, your last appointment ended and you haven't submitted your end-of-shift cash count yet. Please count your cash and submit via CashControl.`
           );
         }
 
-        // Create alert for managers
         await storage.createAlert({
           type: "missing_end_shift",
           staffName: esth.name,

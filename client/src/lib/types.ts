@@ -31,6 +31,7 @@ export interface ShiftCountWithDetails {
   countedAmount: string;
   expectedAmount: string | null;
   discrepancyNote: string | null;
+  floatNote: string | null;
   createdAt: string;
 }
 
