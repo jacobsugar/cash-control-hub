@@ -24,28 +24,34 @@ export default function ShiftsPage() {
     queryKey: ["/api/markets"],
   });
 
-  // Group recounts under their parent count
+  // Group recounts: cluster consecutive entries for same container/esthetician/type within 30 min
+  // The last entry in each cluster is the "final" count; earlier ones are recounts
   const grouped = useMemo(() => {
     if (!shifts) return [];
-    const result: (ShiftCountWithDetails & { recounts?: ShiftCountWithDetails[] })[] = [];
-    const sorted = [...shifts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const sorted = [...shifts].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const clusters: ShiftCountWithDetails[][] = [];
     for (const s of sorted) {
-      if (s.discrepancyNote?.startsWith("[RECOUNT]")) {
-        // Attach to the next non-recount entry for the same container/esthetician/type
-        const parent = result.find(
-          (p) => p.containerId === s.containerId && p.estheticianId === s.estheticianId && p.type === s.type &&
-            !p.discrepancyNote?.startsWith("[RECOUNT]") &&
-            Math.abs(new Date(p.createdAt).getTime() - new Date(s.createdAt).getTime()) < 30 * 60 * 1000
-        );
-        if (parent) {
-          if (!parent.recounts) parent.recounts = [];
-          parent.recounts.push(s);
+      const lastCluster = clusters[clusters.length - 1];
+      if (lastCluster) {
+        const last = lastCluster[lastCluster.length - 1];
+        if (
+          last.containerId === s.containerId &&
+          last.estheticianId === s.estheticianId &&
+          last.type === s.type &&
+          Math.abs(new Date(s.createdAt).getTime() - new Date(last.createdAt).getTime()) < 30 * 60 * 1000
+        ) {
+          lastCluster.push(s);
           continue;
         }
       }
-      result.push({ ...s });
+      clusters.push([s]);
     }
-    return result;
+    // For each cluster, the last entry is the final count, the rest are recounts
+    return clusters.map((cluster) => {
+      const final = cluster[cluster.length - 1];
+      const recounts = cluster.length > 1 ? cluster.slice(0, -1) : undefined;
+      return { ...final, recounts };
+    }).reverse();
   }, [shifts]);
 
   const filtered = useMemo(() => grouped.filter((s) => {

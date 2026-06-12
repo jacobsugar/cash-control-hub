@@ -173,7 +173,7 @@ export default function CountPage() {
       type: shiftType,
       countedAmount,
       expectedAmount,
-      discrepancyNote: hasMismatch ? (recounting ? `[RECOUNT] ${discrepancyNote}` : discrepancyNote) : null,
+      discrepancyNote: hasMismatch ? discrepancyNote : null,
     });
   };
 
