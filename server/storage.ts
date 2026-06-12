@@ -65,6 +65,7 @@ export interface IStorage {
   getReceipts(): Promise<any[]>;
   createReceipt(data: InsertReceipt): Promise<Receipt>;
   getReceipt(id: number): Promise<Receipt | undefined>;
+  updateReceipt(id: number, data: { amount?: string; note?: string }): Promise<void>;
   getReceiptsTotalForContainer(containerId: number, since?: Date): Promise<number>;
 
   // Boulevard Transactions
@@ -527,6 +528,13 @@ export class DatabaseStorage implements IStorage {
   async getReceipt(id: number) {
     const [receipt] = await db.select().from(receipts).where(eq(receipts.id, id));
     return receipt;
+  }
+
+  async updateReceipt(id: number, data: { amount?: string; note?: string }) {
+    const updates: any = {};
+    if (data.amount !== undefined) updates.amount = data.amount;
+    if (data.note !== undefined) updates.note = data.note;
+    await db.update(receipts).set(updates).where(eq(receipts.id, id));
   }
 
   async getReceiptsTotalForContainer(containerId: number, since?: Date) {

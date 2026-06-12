@@ -1242,6 +1242,16 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/admin/receipts/:id", requireAdmin, async (req, res) => {
+    try {
+      const { amount, note } = req.body;
+      await storage.updateReceipt(parseInt(req.params.id), { amount, note });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // Admin Alerts
   app.get("/api/admin/alerts", requireAdmin, async (_req, res) => {
     try {

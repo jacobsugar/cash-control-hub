@@ -1,11 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useState, useMemo } from "react";
-import { Search, Receipt, Eye, X, Download, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Receipt, Eye, X, Download, ChevronLeft, ChevronRight, Pencil, Check, DollarSign } from "lucide-react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { Receipt as ReceiptType } from "@shared/schema";
 
 interface ReceiptWithDetails extends ReceiptType {
@@ -16,8 +20,12 @@ interface ReceiptWithDetails extends ReceiptType {
 }
 
 export default function ReceiptsPage() {
+  const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editAmount, setEditAmount] = useState("");
+  const [editNote, setEditNote] = useState("");
 
   const { data: receipts, isLoading } = useQuery<ReceiptWithDetails[]>({
     queryKey: ["/api/admin/receipts"],
@@ -31,6 +39,21 @@ export default function ReceiptsPage() {
       r.locationName.toLowerCase().includes(q) ||
       (r.note || "").toLowerCase().includes(q);
   }) || [], [receipts, search]);
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, amount, note }: { id: number; amount: string; note: string }) => {
+      await apiRequest("PATCH", `/api/admin/receipts/${id}`, { amount, note });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/receipts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/dashboard"] });
+      setEditing(false);
+      toast({ title: "Receipt updated" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
 
   const selectedReceipt = filtered.find((r) => r.id === selectedId) || null;
   const selectedIndex = selectedReceipt ? filtered.indexOf(selectedReceipt) : -1;
@@ -220,34 +243,88 @@ export default function ReceiptsPage() {
                 )}
               </div>
 
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Amount</span>
-                  <span className="font-mono font-medium">${selectedReceipt.amount}</span>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Staff</span>
-                  <span className="font-medium">{selectedReceipt.estheticianName}</span>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Location</span>
-                  <span>{selectedReceipt.locationName}</span>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Suite</span>
-                  <span>{selectedReceipt.containerName}</span>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Date</span>
-                  <span>{new Date(selectedReceipt.createdAt).toLocaleString()}</span>
-                </div>
-                {selectedReceipt.note && (
-                  <div>
-                    <span className="text-muted-foreground">Note</span>
-                    <p className="mt-0.5">{selectedReceipt.note}</p>
+              {editing ? (
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Amount</Label>
+                    <div className="relative">
+                      <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={editAmount}
+                        onChange={(e) => setEditAmount(e.target.value)}
+                        className="pl-7 h-8 text-sm"
+                      />
+                    </div>
                   </div>
-                )}
-              </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Note</Label>
+                    <Textarea
+                      value={editNote}
+                      onChange={(e) => setEditNote(e.target.value)}
+                      className="text-sm"
+                      rows={2}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      disabled={!editAmount || updateMutation.isPending}
+                      onClick={() => updateMutation.mutate({ id: selectedReceipt.id, amount: editAmount, note: editNote })}
+                    >
+                      <Check className="h-3 w-3 mr-1" />
+                      {updateMutation.isPending ? "Saving..." : "Save"}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">Amount</span>
+                    <span className="font-mono font-medium">${selectedReceipt.amount}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">Staff</span>
+                    <span className="font-medium">{selectedReceipt.estheticianName}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">Location</span>
+                    <span>{selectedReceipt.locationName}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">Suite</span>
+                    <span>{selectedReceipt.containerName}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">Date</span>
+                    <span>{new Date(selectedReceipt.createdAt).toLocaleString()}</span>
+                  </div>
+                  {selectedReceipt.note && (
+                    <div>
+                      <span className="text-muted-foreground">Note</span>
+                      <p className="mt-0.5">{selectedReceipt.note}</p>
+                    </div>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full mt-2"
+                    onClick={() => {
+                      setEditing(true);
+                      setEditAmount(selectedReceipt.amount);
+                      setEditNote(selectedReceipt.note || "");
+                    }}
+                  >
+                    <Pencil className="h-3 w-3 mr-1" />
+                    Edit Receipt
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
