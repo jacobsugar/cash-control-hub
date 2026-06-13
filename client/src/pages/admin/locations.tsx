@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Switch } from "@/components/ui/switch";
 import { Building2, Plus, Trash2, Box, ExternalLink, Copy, Pencil, Check, X, DollarSign } from "lucide-react";
 import type { Market, Location, Container } from "@shared/schema";
 
@@ -398,10 +399,19 @@ export default function LocationsPage() {
                     ) : (
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-medium" data-testid={`text-location-${loc.id}`}>{loc.name}</p>
+                          <Switch
+                            checked={loc.active !== false}
+                            onCheckedChange={(checked) => {
+                              updateLocMutation.mutate({ id: loc.id, data: { active: checked } });
+                            }}
+                          />
+                          <p className={`font-medium ${loc.active === false ? "text-muted-foreground" : ""}`} data-testid={`text-location-${loc.id}`}>{loc.name}</p>
                           <Badge variant={loc.type === "flagship" ? "default" : "secondary"}>
                             {loc.type}
                           </Badge>
+                          {loc.active === false && (
+                            <Badge variant="outline" className="text-muted-foreground">Inactive</Badge>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground">
                           {loc.marketName} &middot; {loc.timezone}

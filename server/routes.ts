@@ -254,6 +254,7 @@ async function checkShiftReminders() {
 
     for (const loc of mappedLocations) {
       if (!loc.boulevardLocationId) continue;
+      if (!loc.active) continue;
       if (enabledLocationIds && !enabledLocationIds.has(loc.id)) continue;
 
       // Get today's start in this location's timezone
@@ -799,7 +800,8 @@ export async function registerRoutes(
   app.get("/api/locations/with-market", async (_req, res) => {
     try {
       const data = await storage.getLocationsWithMarket();
-      res.json(data);
+      // Only show active locations to estheticians
+      res.json(data.filter((l: any) => l.active !== false));
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -836,7 +838,7 @@ export async function registerRoutes(
         sinceDate = new Date(lastCollection!.createdAt);
       } else {
         priorAmount = last?.countedAmount || container.currentBalance || "0.00";
-        sinceDate = last?.createdAt ? new Date(last.createdAt) : undefined;
+        sinceDate = last?.createdAt ? new Date(last.createdAt) : (container.balanceUpdatedAt ? new Date(container.balanceUpdatedAt) : undefined);
       }
 
       const boulevardCash = await storage.getBoulevardCashForLocation(container.locationId, sinceDate);
@@ -1942,6 +1944,7 @@ async function checkMissingEndShifts() {
 
     for (const loc of mappedLocations) {
       if (!loc.boulevardLocationId) continue;
+      if (!loc.active) continue;
 
       const tz = loc.timezone || "America/Chicago";
       const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz });

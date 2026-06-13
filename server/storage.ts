@@ -190,6 +190,7 @@ export class DatabaseStorage implements IStorage {
         id: locations.id,
         name: locations.name,
         type: locations.type,
+        active: locations.active,
         boulevardLocationId: locations.boulevardLocationId,
         timezone: locations.timezone,
         marketName: markets.name,
@@ -209,6 +210,7 @@ export class DatabaseStorage implements IStorage {
         type: locations.type,
         timezone: locations.timezone,
         dailyFloat: locations.dailyFloat,
+        active: locations.active,
         createdAt: locations.createdAt,
         marketName: markets.name,
       })

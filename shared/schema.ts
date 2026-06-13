@@ -30,6 +30,7 @@ export const locations = pgTable("locations", {
   timezone: text("timezone").default("America/Chicago").notNull(),
   dailyFloat: decimal("daily_float", { precision: 10, scale: 2 }).default("20.00"),
   boulevardLocationId: text("boulevard_location_id"),
+  active: boolean("active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
