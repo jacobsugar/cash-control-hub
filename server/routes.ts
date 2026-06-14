@@ -848,6 +848,8 @@ export async function registerRoutes(
         parseFloat(priorAmount) + boulevardCash - receiptSpent
       ).toFixed(2);
 
+      console.log(`Prior calc for container ${containerId}: lastShiftId=${last?.id}, priorAmount=${priorAmount}, sinceDate=${sinceDate?.toISOString()}, blvdCash=${boulevardCash}, receipts=${receiptSpent}, expected=${expectedAmount}`);
+
       res.json({ amount: priorAmount, expectedAmount });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

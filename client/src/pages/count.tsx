@@ -63,6 +63,8 @@ export default function CountPage() {
   const priorQuery = useQuery<{ amount: string; expectedAmount: string }>({
     queryKey: ["/api/containers", selectedContainer, "prior"],
     enabled: !!selectedContainer && step === "count",
+    staleTime: 0,
+    gcTime: 0,
   });
 
   const isRecountingRef = useRef(false);
