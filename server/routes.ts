@@ -1985,10 +1985,7 @@ async function checkMissingEndShifts() {
 
       if (isFlagship) {
         // Flagship: one end count per location per day
-        // Alert goes to whoever has the latest appointment(s)
         if (!locationLastApptEnd) continue;
-        const deadlineTime = new Date(locationLastApptEnd.getTime() + 60 * 60 * 1000);
-        if (now < deadlineTime) continue;
 
         const hasEndCount = await storage.hasLocationEndCountToday(loc.id, todayStart);
         if (hasEndCount) continue;
@@ -2001,98 +1998,146 @@ async function checkMissingEndShifts() {
           }
         }
 
-        for (const staffBoulevardId of latestStaffIds) {
-          const esth = await storage.getEstheticianByBoulevardId(staffBoulevardId);
-          if (!esth || !esth.active) continue;
+        const reminderTime = new Date(locationLastApptEnd.getTime() + 15 * 60 * 1000);
+        const escalationTime = new Date(locationLastApptEnd.getTime() + 60 * 60 * 1000);
 
-          const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "missing_end", todayStart);
-          if (alreadySent) continue;
+        // Stage 1: 15-minute soft reminder to esthetician only
+        if (now >= reminderTime) {
+          for (const staffBoulevardId of latestStaffIds) {
+            const esth = await storage.getEstheticianByBoulevardId(staffBoulevardId);
+            if (!esth || !esth.active) continue;
 
-          if (esth.phone) {
-            await sendPersonalSms(
-              esth.phone,
-              `Hi ${esth.name.split(" ")[0]}, the last appointment at ${loc.name} has ended and no end-of-day cash count has been submitted. Please count the till and submit via CashControl.`
-            );
+            const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "missing_end_reminder", todayStart);
+            if (alreadySent) continue;
+
+            if (esth.phone) {
+              await sendPersonalSms(
+                esth.phone,
+                `Hi ${esth.name.split(" ")[0]}, the last appointment at ${loc.name} has ended. Please submit the end-of-day cash count via CashControl.`
+              );
+            }
+            await storage.createShiftReminder({
+              estheticianId: esth.id,
+              locationId: loc.id,
+              reminderType: "missing_end_reminder",
+              appointmentDate: locationLastApptEnd,
+            });
+            console.log(`15-min end-of-day reminder for ${esth.name} at ${loc.name} (flagship)`);
+          }
+        }
+
+        // Stage 2: 60-minute escalation to esthetician + managers
+        if (now >= escalationTime) {
+          for (const staffBoulevardId of latestStaffIds) {
+            const esth = await storage.getEstheticianByBoulevardId(staffBoulevardId);
+            if (!esth || !esth.active) continue;
+
+            const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "missing_end", todayStart);
+            if (alreadySent) continue;
+
+            if (esth.phone) {
+              await sendPersonalSms(
+                esth.phone,
+                `Hi ${esth.name.split(" ")[0]}, your end-of-day cash count at ${loc.name} is now overdue. Your manager has been notified. Please submit immediately via CashControl.`
+              );
+            }
+            await storage.createShiftReminder({
+              estheticianId: esth.id,
+              locationId: loc.id,
+              reminderType: "missing_end",
+              appointmentDate: locationLastApptEnd,
+            });
           }
 
-          await storage.createShiftReminder({
-            estheticianId: esth.id,
-            locationId: loc.id,
-            reminderType: "missing_end",
-            appointmentDate: locationLastApptEnd,
+          const staffNames = [];
+          for (const sid of latestStaffIds) {
+            const e = await storage.getEstheticianByBoulevardId(sid);
+            if (e) staffNames.push(e.name);
+          }
+          await storage.createAlert({
+            type: "missing_end_shift",
+            staffName: staffNames.join(", ") || null,
+            marketName: loc.marketName || null,
+            locationName: loc.name || null,
+            note: `No end-of-day count submitted at flagship. Last appointment ended at ${locationLastApptEnd.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })}.`,
           });
-          console.log(`Missing end-of-day alert for ${esth.name} at ${loc.name} (flagship)`);
+          sendAlertSms({
+            type: "missing_end_shift",
+            marketName: loc.marketName || null,
+            staffName: staffNames.join(", ") || null,
+            locationName: loc.name || null,
+          });
+          console.log(`60-min end-of-day escalation at ${loc.name} (flagship)`);
         }
-
-        // One alert for the location
-        const staffNames = [];
-        for (const sid of latestStaffIds) {
-          const e = await storage.getEstheticianByBoulevardId(sid);
-          if (e) staffNames.push(e.name);
-        }
-        await storage.createAlert({
-          type: "missing_end_shift",
-          staffName: staffNames.join(", ") || null,
-          marketName: loc.marketName || null,
-          locationName: loc.name || null,
-          note: `No end-of-day count submitted at flagship. Last appointment ended at ${locationLastApptEnd.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })}.`,
-        });
-
-        sendAlertSms({
-          type: "missing_end_shift",
-          marketName: loc.marketName || null,
-          staffName: staffNames.join(", ") || null,
-          locationName: loc.name || null,
-        });
 
         continue;
       }
 
-      // Suite locations: per-esthetician checks
+      // Suite locations: per-esthetician checks (two-stage)
       for (const [staffBoulevardId, lastApptEnd] of staffLastApptEnd) {
-        const deadlineTime = new Date(lastApptEnd.getTime() + 60 * 60 * 1000);
-        if (now < deadlineTime) continue;
-
         const esth = await storage.getEstheticianByBoulevardId(staffBoulevardId);
         if (!esth || !esth.active) continue;
 
         const hasEndCount = await storage.hasEndShiftToday(esth.id, loc.id, todayStart);
         if (hasEndCount) continue;
 
-        const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "missing_end", todayStart);
-        if (alreadySent) continue;
+        const reminderTime = new Date(lastApptEnd.getTime() + 15 * 60 * 1000);
+        const escalationTime = new Date(lastApptEnd.getTime() + 60 * 60 * 1000);
 
-        if (esth.phone) {
-          await sendPersonalSms(
-            esth.phone,
-            `Hi ${esth.name.split(" ")[0]}, your last appointment ended and you haven't submitted your end-of-shift cash count yet. Please count your cash and submit via CashControl.`
-          );
+        // Stage 1: 15-minute soft reminder to esthetician only
+        if (now >= reminderTime) {
+          const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "missing_end_reminder", todayStart);
+          if (!alreadySent) {
+            if (esth.phone) {
+              await sendPersonalSms(
+                esth.phone,
+                `Hi ${esth.name.split(" ")[0]}, your last appointment has ended. Please submit your end-of-shift cash count via CashControl.`
+              );
+            }
+            await storage.createShiftReminder({
+              estheticianId: esth.id,
+              locationId: loc.id,
+              reminderType: "missing_end_reminder",
+              appointmentDate: lastApptEnd,
+            });
+            console.log(`15-min end-shift reminder for ${esth.name} at ${loc.name}`);
+          }
         }
 
-        await storage.createAlert({
-          type: "missing_end_shift",
-          staffName: esth.name,
-          marketName: loc.marketName || null,
-          locationName: loc.name || null,
-          note: `No end-of-shift count submitted. Last appointment ended at ${lastApptEnd.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })}.`,
-        });
+        // Stage 2: 60-minute escalation to esthetician + managers
+        if (now >= escalationTime) {
+          const alreadySent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "missing_end", todayStart);
+          if (!alreadySent) {
+            if (esth.phone) {
+              await sendPersonalSms(
+                esth.phone,
+                `Hi ${esth.name.split(" ")[0]}, your end-of-shift cash count is now overdue. Your manager has been notified. Please submit immediately via CashControl.`
+              );
+            }
 
-        sendAlertSms({
-          type: "missing_end_shift",
-          marketName: loc.marketName || null,
-          staffName: esth.name,
-          locationName: loc.name || null,
-        });
+            await storage.createAlert({
+              type: "missing_end_shift",
+              staffName: esth.name,
+              marketName: loc.marketName || null,
+              locationName: loc.name || null,
+              note: `No end-of-shift count submitted. Last appointment ended at ${lastApptEnd.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })}.`,
+            });
+            sendAlertSms({
+              type: "missing_end_shift",
+              marketName: loc.marketName || null,
+              staffName: esth.name,
+              locationName: loc.name || null,
+            });
 
-        // Record that we sent this reminder
-        await storage.createShiftReminder({
-          estheticianId: esth.id,
-          locationId: loc.id,
-          reminderType: "missing_end",
-          appointmentDate: lastApptEnd,
-        });
-
-        console.log(`Missing end-shift alert for ${esth.name} at ${loc.name} (last appt ended ${lastApptEnd.toISOString()})`);
+            await storage.createShiftReminder({
+              estheticianId: esth.id,
+              locationId: loc.id,
+              reminderType: "missing_end",
+              appointmentDate: lastApptEnd,
+            });
+            console.log(`60-min end-shift escalation for ${esth.name} at ${loc.name}`);
+          }
+        }
       }
     }
   } catch (err) {
