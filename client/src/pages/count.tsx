@@ -158,9 +158,24 @@ export default function CountPage() {
     parseFloat(countedAmount) !== parseFloat(expectedAmount);
 
   const handleSubmit = () => {
-    if (priorQuery.data) {
-      setExpectedAmount(priorQuery.data.expectedAmount);
+    const expected = priorQuery.data?.expectedAmount || null;
+    setExpectedAmount(expected);
+
+    // If amounts match, submit immediately — no second click needed
+    if (expected && parseFloat(countedAmount) === parseFloat(expected)) {
+      const isFlagship = currentLocation?.type === "flagship";
+      submitMutation.mutate({
+        containerId: parseInt(selectedContainer),
+        estheticianId: parseInt(selectedEsthetician),
+        type: shiftType,
+        countedAmount,
+        expectedAmount: expected,
+        discrepancyNote: null,
+        floatNote: isFlagship && shiftType === "end" && floatNote.trim() ? floatNote.trim() : null,
+      });
+      return;
     }
+
     setSubmitted(true);
   };
 
