@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Wallet, Plus, AlertTriangle, CheckCircle2, DollarSign } from "lucide-react";
-import type { CashCollection, Container, Location, Market } from "@shared/schema";
+import type { CashCollection, Location, Container, AdminUser } from "@shared/schema";
 
 interface CollectionWithDetails extends CashCollection {
   containerName: string;
@@ -21,37 +21,36 @@ interface CollectionWithDetails extends CashCollection {
   marketName: string;
 }
 
-interface ContainerOption {
-  id: number;
-  name: string;
-  locationName: string;
+interface LocationWithContainers extends Location {
   marketName: string;
-  currentBalance: string;
+  containers: Container[];
 }
 
 export default function CollectionsPage() {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
-  const [selectedContainer, setSelectedContainer] = useState("");
-  const [collectedAmount, setCollectedAmount] = useState("");
-  const [collectorName, setCollectorName] = useState("");
+  const [selectedLocation, setSelectedLocation] = useState("");
+  const [collectorId, setCollectorId] = useState("");
+  const [collectedAmounts, setCollectedAmounts] = useState<Record<number, string>>({});
   const [note, setNote] = useState("");
 
   const { data: collections, isLoading } = useQuery<CollectionWithDetails[]>({
     queryKey: ["/api/admin/collections"],
   });
 
-  const { data: containerOptions } = useQuery<ContainerOption[]>({
-    queryKey: ["/api/admin/container-options"],
+  const { data: locations } = useQuery<LocationWithContainers[]>({
+    queryKey: ["/api/admin/locations-with-containers"],
   });
 
-  const selectedContainerData = containerOptions?.find((c) => String(c.id) === selectedContainer);
+  const { data: adminUsers } = useQuery<AdminUser[]>({
+    queryKey: ["/api/admin/users"],
+  });
+
+  const selectedLocationData = locations?.find((l) => String(l.id) === selectedLocation);
 
   const collectMutation = useMutation({
     mutationFn: async (data: {
-      containerId: number;
-      expectedAmount: string;
-      collectedAmount: string;
+      containers: { containerId: number; expectedAmount: string; collectedAmount: string }[];
       collectorName: string;
       note: string | null;
     }) => {
@@ -64,9 +63,9 @@ export default function CollectionsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/container-options"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/locations-with-containers"] });
       setOpen(false);
-      setSelectedContainer("");
-      setCollectedAmount("");
-      setCollectorName("");
+      setSelectedLocation("");
+      setCollectorId("");
+      setCollectedAmounts({});
       setNote("");
       toast({ title: "Collection recorded" });
     },
@@ -75,9 +74,43 @@ export default function CollectionsPage() {
     },
   });
 
-  const hasMismatch = selectedContainerData &&
-    collectedAmount &&
-    parseFloat(collectedAmount) !== parseFloat(selectedContainerData.currentBalance);
+  const handleSubmit = () => {
+    if (!selectedLocationData || !collectorId) return;
+    const collector = adminUsers?.find((u) => String(u.id) === collectorId);
+    if (!collector) return;
+
+    const containerItems = selectedLocationData.containers
+      .filter((c) => {
+        const amt = collectedAmounts[c.id];
+        return amt && parseFloat(amt) > 0;
+      })
+      .map((c) => ({
+        containerId: c.id,
+        expectedAmount: c.currentBalance,
+        collectedAmount: collectedAmounts[c.id],
+      }));
+
+    if (containerItems.length === 0) {
+      toast({ title: "No amounts entered", description: "Enter the collected amount for at least one suite.", variant: "destructive" });
+      return;
+    }
+
+    collectMutation.mutate({
+      containers: containerItems,
+      collectorName: collector.name || collector.email,
+      note: note || null,
+    });
+  };
+
+  const totalExpected = selectedLocationData?.containers.reduce(
+    (sum, c) => sum + parseFloat(c.currentBalance), 0
+  ) || 0;
+
+  const totalCollecting = selectedLocationData?.containers.reduce(
+    (sum, c) => sum + (parseFloat(collectedAmounts[c.id] || "0") || 0), 0
+  ) || 0;
+
+  const hasAnyAmount = Object.values(collectedAmounts).some((v) => v && parseFloat(v) > 0);
 
   return (
     <div className="space-y-6">
@@ -93,118 +126,117 @@ export default function CollectionsPage() {
               New Collection
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>Record Cash Collection</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 mt-2">
               <div className="space-y-2">
-                <Label>Suite</Label>
-                <Select value={selectedContainer} onValueChange={setSelectedContainer}>
-                  <SelectTrigger data-testid="select-collection-container">
-                    <SelectValue placeholder="Select suite" />
+                <Label>Location</Label>
+                <Select value={selectedLocation} onValueChange={(val) => {
+                  setSelectedLocation(val);
+                  setCollectedAmounts({});
+                }}>
+                  <SelectTrigger data-testid="select-collection-location">
+                    <SelectValue placeholder="Select location" />
                   </SelectTrigger>
                   <SelectContent>
-                    {containerOptions?.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>
-                        {c.marketName} - {c.locationName} - {c.name}
+                    {locations?.filter(l => l.active !== false).map((l) => (
+                      <SelectItem key={l.id} value={String(l.id)}>
+                        {l.marketName} - {l.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
-              {selectedContainerData && (
-                <Card>
-                  <CardContent className="pt-4 pb-4">
-                    <p className="text-xs text-muted-foreground">Expected Cash in Suite</p>
-                    <p className="text-2xl font-bold text-primary" data-testid="text-expected-collection">
-                      ${parseFloat(selectedContainerData.currentBalance).toFixed(2)}
-                    </p>
-                  </CardContent>
-                </Card>
+              <div className="space-y-2">
+                <Label>Collector</Label>
+                <Select value={collectorId} onValueChange={setCollectorId}>
+                  <SelectTrigger data-testid="select-collector">
+                    <SelectValue placeholder="Who is collecting?" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {adminUsers?.map((u) => (
+                      <SelectItem key={u.id} value={String(u.id)}>
+                        {u.name || u.email}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {selectedLocationData && (
+                <div className="space-y-3">
+                  {selectedLocationData.containers.map((c) => (
+                    <Card key={c.id}>
+                      <CardContent className="pt-3 pb-3">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="text-sm font-medium">{c.name}</span>
+                          <span className="text-sm text-muted-foreground">
+                            Expected: <span className="font-mono font-medium text-foreground">${Math.round(parseFloat(c.currentBalance)).toLocaleString()}</span>
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Label className="text-xs text-muted-foreground shrink-0">Collecting</Label>
+                          <div className="relative flex-1">
+                            <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                            <Input
+                              type="number"
+                              step="1"
+                              min="0"
+                              className="pl-7 h-8"
+                              placeholder="0"
+                              value={collectedAmounts[c.id] || ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val.includes(".")) {
+                                  toast({
+                                    title: "Whole dollars only",
+                                    description: "Round down to the nearest whole dollar.",
+                                    variant: "destructive",
+                                  });
+                                  return;
+                                }
+                                setCollectedAmounts({ ...collectedAmounts, [c.id]: val });
+                              }}
+                              data-testid={`input-collected-${c.id}`}
+                            />
+                          </div>
+                          <span className="text-xs text-muted-foreground shrink-0">
+                            Left: ${Math.max(0, Math.round(parseFloat(c.currentBalance) - (parseFloat(collectedAmounts[c.id] || "0") || 0))).toLocaleString()}
+                          </span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+
+                  <div className="flex items-center justify-between rounded-md bg-muted p-3">
+                    <span className="text-sm font-medium">Total Collecting</span>
+                    <span className="text-lg font-bold">${totalCollecting.toLocaleString()}</span>
+                  </div>
+                </div>
               )}
 
               <div className="space-y-2">
-                <Label>Collector Name</Label>
-                <Input
-                  value={collectorName}
-                  onChange={(e) => setCollectorName(e.target.value)}
-                  placeholder="Who is collecting?"
-                  data-testid="input-collector-name"
+                <Label>Note (optional)</Label>
+                <Textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Any notes about this collection..."
+                  data-testid="input-collection-note"
                 />
               </div>
-
-              <div className="space-y-2">
-                <Label>Amount Collected</Label>
-                <div className="relative">
-                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    type="number"
-                    step="1"
-                    min="0"
-                    className="pl-9"
-                    placeholder="0"
-                    value={collectedAmount}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val.includes(".")) {
-                        toast({
-                          title: "Whole dollars only",
-                          description: "Don't include change — round down to the nearest whole dollar.",
-                          variant: "destructive",
-                        });
-                        return;
-                      }
-                      setCollectedAmount(val);
-                    }}
-                    data-testid="input-collected-amount"
-                  />
-                </div>
-              </div>
-
-              {hasMismatch && (
-                <div className="rounded-md bg-destructive/10 p-3 border border-destructive/20">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 text-destructive" />
-                    <p className="text-sm text-destructive font-medium">Discrepancy detected</p>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Expected ${selectedContainerData?.currentBalance} but collecting ${collectedAmount}
-                  </p>
-                </div>
-              )}
-
-              {hasMismatch && (
-                <div className="space-y-2">
-                  <Label>Note (required for mismatch)</Label>
-                  <Textarea
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="Explain the discrepancy..."
-                    data-testid="input-collection-note"
-                  />
-                </div>
-              )}
 
               <Button
                 className="w-full"
                 disabled={
-                  !selectedContainer ||
-                  !collectedAmount ||
-                  !collectorName ||
-                  (hasMismatch && !note.trim()) ||
+                  !selectedLocation ||
+                  !collectorId ||
+                  !hasAnyAmount ||
                   collectMutation.isPending
                 }
-                onClick={() => {
-                  collectMutation.mutate({
-                    containerId: parseInt(selectedContainer),
-                    expectedAmount: selectedContainerData?.currentBalance || "0",
-                    collectedAmount,
-                    collectorName,
-                    note: note || null,
-                  });
-                }}
+                onClick={handleSubmit}
                 data-testid="button-submit-collection"
               >
                 {collectMutation.isPending ? "Recording..." : "Record Collection"}
@@ -238,41 +270,28 @@ export default function CollectionsPage() {
                     <TableHead>Collector</TableHead>
                     <TableHead className="text-right">Expected</TableHead>
                     <TableHead className="text-right">Collected</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead>Note</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {collections.map((c) => {
-                    const match = parseFloat(c.expectedAmount) === parseFloat(c.collectedAmount);
-                    return (
-                      <TableRow key={c.id} data-testid={`collection-row-${c.id}`}>
-                        <TableCell className="whitespace-nowrap text-sm">
-                          {new Date(c.createdAt).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-xs text-muted-foreground">{c.marketName}</span>
-                          <br />{c.locationName}
-                        </TableCell>
-                        <TableCell>{c.containerName}</TableCell>
-                        <TableCell>{c.collectorName}</TableCell>
-                        <TableCell className="text-right font-mono">${c.expectedAmount}</TableCell>
-                        <TableCell className="text-right font-mono">${c.collectedAmount}</TableCell>
-                        <TableCell>
-                          {match ? (
-                            <div className="flex items-center gap-1">
-                              <CheckCircle2 className="h-3 w-3 text-primary" />
-                              <span className="text-xs">Match</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-1">
-                              <AlertTriangle className="h-3 w-3 text-destructive" />
-                              <span className="text-xs text-destructive">Variance</span>
-                            </div>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                  {collections.map((c) => (
+                    <TableRow key={c.id} data-testid={`collection-row-${c.id}`}>
+                      <TableCell className="whitespace-nowrap text-sm">
+                        {new Date(c.createdAt).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs text-muted-foreground">{c.marketName}</span>
+                        <br />{c.locationName}
+                      </TableCell>
+                      <TableCell>{c.containerName}</TableCell>
+                      <TableCell>{c.collectorName}</TableCell>
+                      <TableCell className="text-right font-mono">${c.expectedAmount}</TableCell>
+                      <TableCell className="text-right font-mono">${c.collectedAmount}</TableCell>
+                      <TableCell className="max-w-[150px] truncate text-xs text-muted-foreground">
+                        {c.note || "-"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </div>

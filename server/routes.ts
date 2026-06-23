@@ -1432,48 +1432,35 @@ export async function registerRoutes(
 
   app.post("/api/admin/collections", requireAdmin, async (req, res) => {
     try {
-      const { containerId, expectedAmount, collectedAmount, collectorName, note } = req.body;
+      const { containers: containerCollections, collectorName, note } = req.body;
 
-      const collection = await storage.createCollection({
-        containerId,
-        expectedAmount,
-        collectedAmount,
-        collectorName,
-        note,
-      });
+      // Support both old format (single container) and new format (multiple containers)
+      const items: { containerId: number; expectedAmount: string; collectedAmount: string }[] = containerCollections
+        || [{ containerId: req.body.containerId, expectedAmount: req.body.expectedAmount, collectedAmount: req.body.collectedAmount }];
 
-      // Reset container balance to 0 after collection
-      await storage.updateContainerBalance(containerId, "0.00");
+      const results = [];
+      for (const item of items) {
+        if (!item.collectedAmount || parseFloat(item.collectedAmount) === 0) continue;
 
-      // Create alert if mismatch
-      if (parseFloat(expectedAmount) !== parseFloat(collectedAmount)) {
-        const container = await storage.getContainer(containerId);
-        const loc = container ? await storage.getLocation(container.locationId) : undefined;
-
-        await storage.createAlert({
-          type: "collection_mismatch",
-          staffName: collectorName,
-          marketName: loc?.marketName || null,
-          locationName: loc?.name || null,
-          containerName: container?.name || null,
-          expectedAmount,
-          actualAmount: collectedAmount,
+        const collection = await storage.createCollection({
+          containerId: item.containerId,
+          expectedAmount: item.expectedAmount,
+          collectedAmount: item.collectedAmount,
+          collectorName,
           note,
         });
 
-        sendAlertSms({
-          type: "collection_mismatch",
-          marketName: loc?.marketName || null,
-          staffName: collectorName,
-          locationName: loc?.name || null,
-          containerName: container?.name || null,
-          expectedAmount,
-          actualAmount: collectedAmount,
-          note,
-        });
+        // Subtract collected amount from current balance (leave remainder behind)
+        const container = await storage.getContainer(item.containerId);
+        if (container) {
+          const newBalance = Math.max(0, parseFloat(container.currentBalance) - parseFloat(item.collectedAmount));
+          await storage.updateContainerBalance(item.containerId, String(newBalance));
+        }
+
+        results.push(collection);
       }
 
-      res.json(collection);
+      res.json(results);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
