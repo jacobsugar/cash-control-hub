@@ -238,12 +238,12 @@ async function sendPersonalSms(toPhone: string, message: string) {
  * and send them a reminder text if their first appointment was 15+ minutes ago.
  * Only runs for locations with shift_reminders_enabled setting.
  */
-async function checkShiftReminders() {
+async function checkShiftReminders(locations?: any[], appointmentCache?: Map<number, any[]>) {
   try {
     const enabled = await storage.getSetting("shift_reminders_enabled");
     if (enabled !== "true") return;
 
-    const mappedLocations = await storage.getBoulevardMappedLocations();
+    const mappedLocations = locations || (await storage.getBoulevardMappedLocations()).filter(l => l.active && l.boulevardLocationId);
     const now = new Date();
 
     // Check per-location enable setting
@@ -254,7 +254,6 @@ async function checkShiftReminders() {
 
     for (const loc of mappedLocations) {
       if (!loc.boulevardLocationId) continue;
-      if (!loc.active) continue;
       if (enabledLocationIds && !enabledLocationIds.has(loc.id)) continue;
 
       // Get today's start in this location's timezone
@@ -262,13 +261,8 @@ async function checkShiftReminders() {
       const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz }); // YYYY-MM-DD
       const todayStart = new Date(todayStr + "T00:00:00");
 
-      let appointments;
-      try {
-        appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId, now);
-      } catch (e) {
-        console.warn(`Shift reminder: failed to fetch appointments for ${loc.name}:`, e);
-        continue;
-      }
+      const appointments = appointmentCache?.get(loc.id);
+      if (!appointments) continue;
 
       // Group by staff — find earliest appointment startAt per staff member
       const staffFirstAppt = new Map<string, Date>();
@@ -577,19 +571,36 @@ async function startBoulevardAutoSync() {
       } catch (err) {
         console.error("Boulevard auto-sync error:", err);
       }
+    }
 
-      // Start-of-shift reminders (only during operating hours)
+    // Fetch appointments once for active locations, share between checks
+    const mappedLocations = await storage.getBoulevardMappedLocations();
+    const activeLocations = mappedLocations.filter(l => l.active && l.boulevardLocationId);
+    const appointmentCache = new Map<number, any[]>();
+
+    for (const loc of activeLocations) {
       try {
-        await checkShiftReminders();
+        // Small delay between API calls to avoid rate limits
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const appts = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId!, new Date());
+        appointmentCache.set(loc.id, appts);
+      } catch (e) {
+        console.warn(`Failed to fetch appointments for ${loc.name}:`, e);
+      }
+    }
+
+    // Start-of-shift reminders (only during operating hours)
+    if (withinOperatingHours) {
+      try {
+        await checkShiftReminders(activeLocations, appointmentCache);
       } catch (err) {
         console.error("Shift reminder check error:", err);
       }
     }
 
-    // End-of-shift checks and cleanliness escalations run ALWAYS
-    // (estheticians may finish shifts after operating hours)
+    // End-of-shift checks run ALWAYS (shifts may end after operating hours)
     try {
-      await checkMissingEndShifts();
+      await checkMissingEndShifts(activeLocations, appointmentCache);
     } catch (err) {
       console.error("Missing end-shift check error:", err);
     }
@@ -1965,27 +1976,21 @@ async function checkUnresolvedCleanlinessReports() {
  * Check for missing end-of-shift counts based on Boulevard appointment data.
  * Triggers 60 minutes after an esthetician's last appointment ends for the day.
  */
-async function checkMissingEndShifts() {
+async function checkMissingEndShifts(locations?: any[], appointmentCache?: Map<number, any[]>) {
   try {
-    const mappedLocations = await storage.getBoulevardMappedLocations();
+    const mappedLocations = locations || (await storage.getBoulevardMappedLocations()).filter(l => l.active && l.boulevardLocationId);
     const now = new Date();
 
     for (const loc of mappedLocations) {
       if (!loc.boulevardLocationId) continue;
-      if (!loc.active) continue;
 
       const tz = loc.timezone || "America/Chicago";
       const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz });
       const todayStart = new Date(todayStr + "T00:00:00");
       const isFlagship = loc.type === "flagship";
 
-      let appointments;
-      try {
-        appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId, now);
-      } catch (e) {
-        console.warn(`Missing end-shift check: failed to fetch appointments for ${loc.name}:`, e);
-        continue;
-      }
+      const appointments = appointmentCache?.get(loc.id);
+      if (!appointments) continue;
 
       // Build per-staff last appointment end times for today
       const staffLastApptEnd = new Map<string, Date>();

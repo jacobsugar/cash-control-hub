@@ -27,6 +27,7 @@ export default function CountPage() {
   const [selectedLocation, setSelectedLocation] = useState(locationIdParam || "");
   const [selectedContainer, setSelectedContainer] = useState("");
   const [countedAmount, setCountedAmount] = useState("");
+  const [bills, setBills] = useState<Record<string, string>>({ "100": "", "50": "", "20": "", "10": "", "5": "", "1": "" });
   const [discrepancyNote, setDiscrepancyNote] = useState("");
   const [floatNote, setFloatNote] = useState("");
   const [priorAmount, setPriorAmount] = useState<string | null>(null);
@@ -141,6 +142,7 @@ export default function CountPage() {
     setSubmitted(false);
     setRecounting(false);
     setCountedAmount("");
+    setBills({ "100": "", "50": "", "20": "", "10": "", "5": "", "1": "" });
     setExpectedAmount(null);
     setDiscrepancyNote("");
     setFloatNote("");
@@ -196,6 +198,7 @@ export default function CountPage() {
         setSubmitted(false);
         setRecounting(true);
         setCountedAmount("");
+    setBills({ "100": "", "50": "", "20": "", "10": "", "5": "", "1": "" });
         setExpectedAmount(null);
         setDiscrepancyNote("");
     setFloatNote("");
@@ -245,6 +248,7 @@ export default function CountPage() {
                 onClick={() => {
                   setStep("select");
                   setCountedAmount("");
+    setBills({ "100": "", "50": "", "20": "", "10": "", "5": "", "1": "" });
                   setDiscrepancyNote("");
     setFloatNote("");
                   setSelectedEsthetician("");
@@ -459,35 +463,46 @@ export default function CountPage() {
             {!submitted ? (
               <Card>
                 <CardContent className="pt-6 space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="counted">Count the cash and enter the total</Label>
-                    <div className="relative">
-                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="counted"
-                        type="number"
-                        step="1"
-                        min="0"
-                        placeholder="0"
-                        className="pl-9 text-lg"
-                        value={countedAmount}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val.includes(".")) {
-                            toast({
-                              title: "Whole dollars only",
-                              description: "Don't include change — round down to the nearest whole dollar.",
-                              variant: "destructive",
-                            });
-                            return;
-                          }
-                          setCountedAmount(val);
-                        }}
-                        data-testid="input-counted-amount"
-                      />
+                  <div className="space-y-3">
+                    <Label>Count each bill type</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["100", "50", "20", "10", "5", "1"] as const).map((denom) => (
+                        <div key={denom} className="flex items-center gap-2 rounded-md border p-2">
+                          <span className="text-sm font-medium w-10 shrink-0">${denom}</span>
+                          <span className="text-muted-foreground text-sm">&times;</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="1"
+                            placeholder="0"
+                            className="h-8 text-center"
+                            value={bills[denom]}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val.includes(".")) return;
+                              const newBills = { ...bills, [denom]: val };
+                              setBills(newBills);
+                              const total = Object.entries(newBills).reduce((sum, [d, count]) => {
+                                return sum + (parseInt(d) * (parseInt(count) || 0));
+                              }, 0);
+                              setCountedAmount(total > 0 ? String(total) : "");
+                            }}
+                            data-testid={`input-bills-${denom}`}
+                          />
+                          <span className="text-xs text-muted-foreground w-16 text-right">
+                            = ${(parseInt(denom) * (parseInt(bills[denom]) || 0)).toLocaleString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between rounded-md bg-muted p-3">
+                      <span className="text-sm font-medium">Total</span>
+                      <span className="text-xl font-bold" data-testid="text-bill-total">
+                        ${countedAmount ? parseInt(countedAmount).toLocaleString() : "0"}
+                      </span>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Enter the whole dollar amount only — do not include change.
+                      Enter the number of each bill. Do not include coins.
                     </p>
                   </div>
 
