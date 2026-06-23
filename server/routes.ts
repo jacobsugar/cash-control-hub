@@ -564,24 +564,40 @@ async function startBoulevardAutoSync() {
   const minutes = parseInt(freqStr || "10") || 10;
 
   boulevardSyncInterval = setInterval(async () => {
-    try {
-      // Skip sync outside operating hours
-      if (!(await shouldSync())) return;
+    const withinOperatingHours = await shouldSync();
 
-      const result = await syncAllBoulevardLocations("auto");
-      if (result.totalImported > 0) {
-        console.log(`Boulevard auto-sync: imported ${result.totalImported} transactions`);
+    // Boulevard sync only runs during operating hours
+    if (withinOperatingHours) {
+      try {
+        const result = await syncAllBoulevardLocations("auto");
+        if (result.totalImported > 0) {
+          console.log(`Boulevard auto-sync: imported ${result.totalImported} transactions`);
+        }
+        await syncStaffFromBoulevard();
+      } catch (err) {
+        console.error("Boulevard auto-sync error:", err);
       }
-      // Also sync staff
-      await syncStaffFromBoulevard();
-      // Check for missing shift count reminders
-      await checkShiftReminders();
-      // Check for missing end-of-shift counts (based on Boulevard appointments)
+
+      // Start-of-shift reminders (only during operating hours)
+      try {
+        await checkShiftReminders();
+      } catch (err) {
+        console.error("Shift reminder check error:", err);
+      }
+    }
+
+    // End-of-shift checks and cleanliness escalations run ALWAYS
+    // (estheticians may finish shifts after operating hours)
+    try {
       await checkMissingEndShifts();
-      // Check for unresolved cleanliness reports needing escalation
+    } catch (err) {
+      console.error("Missing end-shift check error:", err);
+    }
+
+    try {
       await checkUnresolvedCleanlinessReports();
     } catch (err) {
-      console.error("Boulevard auto-sync error:", err);
+      console.error("Cleanliness escalation check error:", err);
     }
   }, minutes * 60 * 1000);
 
@@ -967,19 +983,29 @@ export async function registerRoutes(
         }
       }
 
-      // Flagship start count: only one per day
+      // Prevent duplicate start counts
       if (type === "start") {
         const container = await storage.getContainer(containerId);
         if (container) {
           const loc = await storage.getLocation(container.locationId);
+          const tz = loc?.timezone || "America/Chicago";
+          const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+          const todayStart = new Date(todayStr + "T00:00:00");
+
           if (loc?.type === "flagship") {
-            const tz = loc.timezone || "America/Chicago";
-            const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
-            const todayStart = new Date(todayStr + "T00:00:00");
+            // Flagship: one start count per location per day
             const hasStart = await storage.hasLocationStartCountToday(container.locationId, todayStart);
             if (hasStart) {
               return res.status(400).json({
                 message: "A start-of-day count has already been submitted for this location today.",
+              });
+            }
+          } else {
+            // Suite: one start count per esthetician per location per day
+            const hasStart = await storage.hasStartShiftToday(estheticianId, container.locationId, todayStart);
+            if (hasStart) {
+              return res.status(400).json({
+                message: "You have already submitted a start-of-shift count today.",
               });
             }
           }
