@@ -1037,16 +1037,18 @@ export async function registerRoutes(
       // Update container balance
       await storage.updateContainerBalance(containerId, countedAmount);
 
-      // Check for mismatch and create alert (only for start-of-shift counts)
-      if (type === "start" && expectedAmount && parseFloat(countedAmount) !== parseFloat(expectedAmount)) {
+      // Check for mismatch and create alert — only on final submission (not first-attempt recounts)
+      const isRecount = discrepancyNote?.startsWith("[RECOUNT]");
+      if (!isRecount && expectedAmount && parseFloat(countedAmount) !== parseFloat(expectedAmount)) {
         const [container, esth] = await Promise.all([
           storage.getContainer(containerId),
           storage.getEsthetician(estheticianId),
         ]);
         const loc = container ? await storage.getLocation(container.locationId) : undefined;
 
+        const alertType = type === "start" ? "start_mismatch" : "end_mismatch";
         await storage.createAlert({
-          type: "start_mismatch",
+          type: alertType,
           staffName: esth?.name || null,
           marketName: loc?.marketName || null,
           locationName: loc?.name || null,
@@ -1058,7 +1060,7 @@ export async function registerRoutes(
         });
 
         sendAlertSms({
-          type: "start_mismatch",
+          type: alertType,
           marketName: loc?.marketName || null,
           staffName: esth?.name || null,
           locationName: loc?.name || null,
