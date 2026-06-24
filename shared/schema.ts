@@ -81,6 +81,7 @@ export const receipts = pgTable("receipts", {
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   filePath: text("file_path"),
   fileName: text("file_name"),
+  fileData: text("file_data"),
   hasReceipt: boolean("has_receipt").default(true).notNull(),
   note: text("note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -191,6 +192,7 @@ export const cleanlinessReportPhotos = pgTable("cleanliness_report_photos", {
   reportId: integer("report_id").notNull().references(() => cleanlinessReports.id),
   filePath: text("file_path").notNull(),
   fileName: text("file_name").notNull(),
+  fileData: text("file_data"),
   photoTakenAt: timestamp("photo_taken_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

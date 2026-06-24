@@ -1117,12 +1117,19 @@ export async function registerRoutes(
         return res.status(400).send("No file uploaded");
       }
 
+      let fileData: string | null = null;
+      if (hasFile) {
+        fileData = fs.readFileSync(req.file!.path).toString("base64");
+        try { fs.unlinkSync(req.file!.path); } catch { /* ok */ }
+      }
+
       const receipt = await storage.createReceipt({
         containerId: parseInt(containerId),
         estheticianId: parseInt(estheticianId),
         amount,
         filePath: hasFile ? req.file!.path : null,
         fileName: hasFile ? req.file!.originalname : null,
+        fileData,
         hasReceipt: hasFile,
         note: note || null,
         shiftCountId: shiftCountId ? parseInt(shiftCountId) : null,
@@ -1186,23 +1193,59 @@ export async function registerRoutes(
     }
   });
 
-  // Serve receipt file
+  // Serve receipt file (from DB or disk fallback)
   app.get("/api/receipts/:id/file", async (req, res) => {
     try {
       const receipt = await storage.getReceipt(parseInt(req.params.id));
       if (!receipt) return res.status(404).json({ message: "Receipt not found" });
-      if (!fs.existsSync(receipt.filePath)) return res.status(404).json({ message: "File not found" });
-      res.sendFile(receipt.filePath);
+
+      // Try disk first
+      if (receipt.filePath && fs.existsSync(receipt.filePath)) {
+        return res.sendFile(receipt.filePath);
+      }
+
+      // Fall back to database
+      if (receipt.fileData) {
+        const buffer = Buffer.from(receipt.fileData, "base64");
+        const ext = (receipt.fileName || "").toLowerCase();
+        const contentType = ext.endsWith(".png") ? "image/png" : ext.endsWith(".pdf") ? "application/pdf" : ext.endsWith(".webp") ? "image/webp" : "image/jpeg";
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        return res.send(buffer);
+      }
+
+      res.status(404).json({ message: "File not found" });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
   });
 
-  // Serve cleanliness report photos
-  app.get("/api/cleanliness-photos/:filename", (req, res) => {
+  // Serve cleanliness report photos (from DB or disk fallback)
+  app.get("/api/cleanliness-photos/:filename", async (req, res) => {
+    // Try disk first
     const filePath = path.join(uploadDir, req.params.filename);
-    if (!fs.existsSync(filePath)) return res.status(404).json({ message: "File not found" });
-    res.sendFile(filePath);
+    if (fs.existsSync(filePath)) return res.sendFile(filePath);
+
+    // Fall back to database
+    try {
+      const photos = await db.execute(sql`
+        SELECT file_data, file_name FROM cleanliness_report_photos
+        WHERE file_path LIKE ${"%" + req.params.filename}
+        LIMIT 1
+      `);
+      const photo = photos.rows[0] as any;
+      if (photo?.file_data) {
+        const buffer = Buffer.from(photo.file_data, "base64");
+        const ext = (photo.file_name || "").toLowerCase();
+        const contentType = ext.endsWith(".png") ? "image/png" : ext.endsWith(".webp") ? "image/webp" : "image/jpeg";
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        return res.send(buffer);
+      }
+      res.status(404).json({ message: "Photo not found" });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
   });
 
   // Create cleanliness report (public - esthetician facing)
@@ -1228,16 +1271,14 @@ export async function registerRoutes(
 
       const files = (req.files as Express.Multer.File[]) || [];
       for (const file of files) {
-        let photoTakenAt: Date | null = null;
-        try {
-          photoTakenAt = fs.statSync(file.path).mtime;
-        } catch { /* fallback: null */ }
+        const fileData = fs.readFileSync(file.path).toString("base64");
         await storage.createCleanlinessReportPhoto({
           reportId: report.id,
           filePath: file.path,
           fileName: file.originalname,
-          photoTakenAt,
+          fileData,
         });
+        try { fs.unlinkSync(file.path); } catch { /* ok */ }
       }
 
       const [loc, reporter] = await Promise.all([
@@ -1996,12 +2037,15 @@ export async function registerRoutes(
 
       for (const loc of mappedLocations) {
         try {
+          const tz = loc.timezone || "America/Chicago";
+          const todayStr = today.toLocaleDateString("en-CA", { timeZone: tz });
+
           const appointments = await boulevard.fetchAppointmentsForLocation(
             loc.boulevardLocationId!,
             today
           );
 
-          // Group by staff member
+          // Group by staff member — only today's non-cancelled appointments
           const staffMap = new Map<string, {
             estheticianName: string;
             boulevardStaffId: string;
@@ -2010,6 +2054,10 @@ export async function registerRoutes(
 
           for (const appt of appointments) {
             if (appt.state === "CANCELLED") continue;
+            // Filter to today only
+            const apptDate = new Date(appt.startAt).toLocaleDateString("en-CA", { timeZone: tz });
+            if (apptDate !== todayStr) continue;
+
             const clientName = appt.client
               ? `${appt.client.firstName || ""} ${appt.client.lastName || ""}`.trim()
               : "Walk-in";
