@@ -30,32 +30,47 @@ function getAdminAuth(): { url: string; authorization: string } | null {
 
 async function graphql<T = any>(
   query: string,
-  variables?: Record<string, any>
+  variables?: Record<string, any>,
+  retries = 3
 ): Promise<T> {
   const auth = getAdminAuth();
   if (!auth) {
     throw new Error("Boulevard API credentials not configured");
   }
 
-  const res = await fetch(auth.url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: auth.authorization,
-    },
-    body: JSON.stringify({ query, variables }),
-  });
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const res = await fetch(auth.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: auth.authorization,
+      },
+      body: JSON.stringify({ query, variables }),
+    });
 
-  const text = await res.text();
-  if (text.startsWith("<")) {
-    throw new Error(`Boulevard API returned HTML (status ${res.status}) — auth may have expired`);
+    const text = await res.text();
+    if (text.startsWith("<")) {
+      throw new Error(`Boulevard API returned HTML (status ${res.status}) — auth may have expired`);
+    }
+
+    const json = JSON.parse(text);
+    if (json.errors?.length) {
+      const errMsg = json.errors[0].message;
+
+      // Retry on rate limit errors
+      if (errMsg.includes("API limit exceeded") && attempt < retries) {
+        const waitMatch = errMsg.match(/wait (\d+)ms/);
+        const waitMs = waitMatch ? parseInt(waitMatch[1]) + 100 : 1000;
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+        continue;
+      }
+
+      throw new Error(`Boulevard GraphQL error: ${errMsg}`);
+    }
+    return json.data as T;
   }
 
-  const json = JSON.parse(text);
-  if (json.errors?.length) {
-    throw new Error(`Boulevard GraphQL error: ${json.errors[0].message}`);
-  }
-  return json.data as T;
+  throw new Error("Boulevard API: max retries exceeded");
 }
 
 // Fetch all pages of a connection query

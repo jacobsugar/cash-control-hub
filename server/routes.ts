@@ -586,7 +586,7 @@ async function startBoulevardAutoSync() {
     // Boulevard sync only runs during operating hours
     if (withinOperatingHours) {
       try {
-        const result = await syncAllBoulevardLocations("auto", true);
+        const result = await syncAllBoulevardLocations("auto");
         if (result.totalImported > 0) {
           console.log(`Boulevard auto-sync: imported ${result.totalImported} transactions`);
         }
@@ -602,8 +602,6 @@ async function startBoulevardAutoSync() {
 
     for (const loc of activeLocations) {
       try {
-        // Small delay between API calls to avoid rate limits
-        await new Promise(resolve => setTimeout(resolve, 500));
         const appts = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId!, new Date());
         appointmentCache.set(loc.id, appts);
       } catch (e) {
