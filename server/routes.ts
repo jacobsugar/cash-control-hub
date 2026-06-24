@@ -962,8 +962,8 @@ export async function registerRoutes(
                 message: "A start-of-day count must be submitted before the end-of-day count.",
               });
             }
-            // Flagship: only one end count per day (skip for recounts)
-            if (!discrepancyNote?.startsWith("[RECOUNT]")) {
+            // Flagship: only one end count per day (skip for recount flow)
+            if (!discrepancyNote?.startsWith("[RECOUNT]") && !req.body.isRecount) {
               const hasEnd = await storage.hasLocationEndCountToday(container.locationId, todayStart);
               if (hasEnd) {
                 return res.status(400).json({
@@ -1022,9 +1022,9 @@ export async function registerRoutes(
         }
       }
 
-      // Prevent duplicate start counts (skip check for recounts)
-      const isRecountSubmission = discrepancyNote?.startsWith("[RECOUNT]");
-      if (type === "start" && !isRecountSubmission) {
+      // Prevent duplicate start counts (skip if this is part of a recount flow)
+      const isRecountFlow = discrepancyNote?.startsWith("[RECOUNT]") || req.body.isRecount;
+      if (type === "start" && !isRecountFlow) {
         const container = await storage.getContainer(containerId);
         if (container) {
           const loc = await storage.getLocation(container.locationId);

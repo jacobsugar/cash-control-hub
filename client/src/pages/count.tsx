@@ -79,6 +79,7 @@ export default function CountPage() {
       expectedAmount: string | null;
       discrepancyNote: string | null;
       floatNote?: string | null;
+      isRecount?: boolean;
     }) => {
       const res = await apiRequest("POST", "/api/shift-counts", data);
       return res.json();
@@ -174,6 +175,7 @@ export default function CountPage() {
         expectedAmount: expected,
         discrepancyNote: null,
         floatNote: isFlagship && shiftType === "end" && floatNote.trim() ? floatNote.trim() : null,
+        isRecount: recounting,
       });
       return;
     }
@@ -221,6 +223,7 @@ export default function CountPage() {
       expectedAmount,
       discrepancyNote: hasMismatch ? discrepancyNote : null,
       floatNote: isFlagship && shiftType === "end" && floatNote.trim() ? floatNote.trim() : null,
+      isRecount: recounting,
     });
   };
 
@@ -465,7 +468,7 @@ export default function CountPage() {
                 <CardContent className="pt-6 space-y-4">
                   <div className="space-y-3">
                     <Label>Count each bill type</Label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 gap-2">
                       {(["100", "50", "20", "10", "5", "1"] as const).map((denom) => (
                         <div key={denom} className="flex items-center gap-2 rounded-md border p-2">
                           <span className="text-sm font-medium w-10 shrink-0">${denom}</span>
