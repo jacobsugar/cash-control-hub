@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage, db } from "./storage";
 import { cleanlinessReports } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -24,6 +24,24 @@ function getOpenAIClient(): OpenAI {
     });
   }
   return openaiClient;
+}
+
+// In-memory SMS log for debugging and auditing
+interface SmsLogEntry {
+  recipientName: string;
+  recipientPhone: string;
+  message: string;
+  type: "alert" | "reminder";
+  success: boolean;
+  error?: string;
+  sentAt: string;
+}
+const smsLog: SmsLogEntry[] = [];
+const MAX_SMS_LOG = 500;
+
+function pushSmsLog(entry: SmsLogEntry) {
+  smsLog.unshift(entry);
+  if (smsLog.length > MAX_SMS_LOG) smsLog.length = MAX_SMS_LOG;
 }
 
 function formatPhoneE164(phone: string): string {
@@ -169,9 +187,11 @@ async function sendAlertSms(alertData: {
 
       if (sendRes.ok) {
         console.log(`SMS sent to ${recipient.name} (${toNumber})`);
+        pushSmsLog({ recipientName: recipient.name || "Unknown", recipientPhone: toNumber, message, type: "alert", success: true, sentAt: new Date().toISOString() });
       } else {
         const errText = await sendRes.text();
         console.error(`SMS failed for ${recipient.name} (${toNumber}): ${sendRes.status} ${errText}`);
+        pushSmsLog({ recipientName: recipient.name || "Unknown", recipientPhone: toNumber, message, type: "alert", success: false, error: `${sendRes.status} ${errText}`, sentAt: new Date().toISOString() });
       }
     });
 
@@ -224,9 +244,11 @@ async function sendPersonalSms(toPhone: string, message: string) {
     });
     if (sendRes.ok) {
       console.log(`Personal SMS sent to ${toNumber}`);
+      pushSmsLog({ recipientName: toNumber, recipientPhone: toNumber, message, type: "reminder", success: true, sentAt: new Date().toISOString() });
     } else {
       const errText = await sendRes.text();
       console.error(`Personal SMS failed for ${toNumber}: ${sendRes.status} ${errText}`);
+      pushSmsLog({ recipientName: toNumber, recipientPhone: toNumber, message, type: "reminder", success: false, error: `${sendRes.status} ${errText}`, sentAt: new Date().toISOString() });
     }
   } catch (err) {
     console.error("Personal SMS error:", err);
@@ -454,8 +476,9 @@ async function syncBoulevardLocationWithHistory(
   }
 }
 
-async function syncAllBoulevardLocations(syncType: "auto" | "manual" = "auto") {
-  const mappedLocations = await storage.getBoulevardMappedLocations();
+async function syncAllBoulevardLocations(syncType: "auto" | "manual" = "auto", activeOnly = false) {
+  const allLocations = await storage.getBoulevardMappedLocations();
+  const mappedLocations = activeOnly ? allLocations.filter(l => l.active) : allLocations;
   const results: { locationName: string; imported: number; skipped: number; error?: string }[] = [];
   let totalImported = 0;
 
@@ -563,11 +586,10 @@ async function startBoulevardAutoSync() {
     // Boulevard sync only runs during operating hours
     if (withinOperatingHours) {
       try {
-        const result = await syncAllBoulevardLocations("auto");
+        const result = await syncAllBoulevardLocations("auto", true);
         if (result.totalImported > 0) {
           console.log(`Boulevard auto-sync: imported ${result.totalImported} transactions`);
         }
-        await syncStaffFromBoulevard();
       } catch (err) {
         console.error("Boulevard auto-sync error:", err);
       }
@@ -1885,6 +1907,161 @@ export async function registerRoutes(
       }
       await storage.updateContainerBalance(parseInt(req.params.id), String(balance));
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── SMS log endpoint ──────────────────────────────────────────────
+  app.get("/api/admin/sms-log", requireAdmin, async (_req, res) => {
+    res.json(smsLog);
+  });
+
+  // ── Open counts (start with no matching end) ────────────────────
+  app.get("/api/admin/open-counts", requireAdmin, async (_req, res) => {
+    try {
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const result = await db.execute(sql`
+        SELECT DISTINCT ON (sc.esthetician_id, l.id)
+          sc.esthetician_id AS "estheticianId",
+          e.name AS "estheticianName",
+          e.phone,
+          l.name AS "locationName",
+          m.name AS "marketName",
+          c.name AS "containerName",
+          sc.created_at AS "startCountTime"
+        FROM shift_counts sc
+        JOIN containers c ON sc.container_id = c.id
+        JOIN locations l ON c.location_id = l.id
+        JOIN markets m ON l.market_id = m.id
+        JOIN estheticians e ON sc.esthetician_id = e.id
+        WHERE sc.type = 'start'
+          AND sc.created_at > ${cutoff}
+          AND NOT EXISTS (
+            SELECT 1 FROM shift_counts sc2
+            JOIN containers c2 ON sc2.container_id = c2.id
+            WHERE sc2.esthetician_id = sc.esthetician_id
+              AND c2.location_id = c.location_id
+              AND sc2.type = 'end'
+              AND sc2.created_at > sc.created_at
+          )
+        ORDER BY sc.esthetician_id, l.id, sc.created_at DESC
+      `);
+      res.json(result.rows);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Send manual reminder to an esthetician ──────────────────────
+  app.post("/api/admin/send-reminder", requireAdmin, async (req, res) => {
+    try {
+      const { estheticianId } = req.body;
+      if (!estheticianId) {
+        return res.status(400).json({ message: "estheticianId is required" });
+      }
+
+      const esth = await storage.getEsthetician(estheticianId);
+      if (!esth) return res.status(404).json({ message: "Esthetician not found" });
+      if (!esth.phone) return res.status(400).json({ message: "Esthetician has no phone number on file" });
+
+      const locationName = "your location";
+
+      await sendPersonalSms(
+        esth.phone,
+        `Hi ${esth.name.split(" ")[0]}, this is a reminder to submit your end-of-shift cash count for ${locationName}. Please count your drawer and submit via CashControl.`
+      );
+
+      res.json({ success: true, message: `Reminder sent to ${esth.name}` });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Daily appointments (first/last per staff per location) ──────
+  app.get("/api/admin/daily-appointments", requireAdmin, async (_req, res) => {
+    try {
+      const mappedLocations = (await storage.getBoulevardMappedLocations()).filter(
+        (l) => l.active && l.boulevardLocationId
+      );
+      const today = new Date();
+      const results: any[] = [];
+
+      for (const loc of mappedLocations) {
+        try {
+          const appointments = await boulevard.fetchAppointmentsForLocation(
+            loc.boulevardLocationId!,
+            today
+          );
+
+          // Group by staff member
+          const staffMap = new Map<string, {
+            estheticianName: string;
+            boulevardStaffId: string;
+            appointments: { time: string; clientName: string }[];
+          }>();
+
+          for (const appt of appointments) {
+            if (appt.state === "CANCELLED") continue;
+            const clientName = appt.client
+              ? `${appt.client.firstName || ""} ${appt.client.lastName || ""}`.trim()
+              : "Walk-in";
+
+            for (const svc of appt.appointmentServices) {
+              const staffId = svc.staff?.id;
+              if (!staffId) continue;
+              const staffName = `${svc.staff.firstName || ""} ${svc.staff.lastName || ""}`.trim();
+
+              if (!staffMap.has(staffId)) {
+                staffMap.set(staffId, {
+                  estheticianName: staffName,
+                  boulevardStaffId: staffId,
+                  appointments: [],
+                });
+              }
+              staffMap.get(staffId)!.appointments.push({
+                time: appt.startAt,
+                clientName,
+              });
+            }
+          }
+
+          // Determine first and last appointment per staff
+          const staff = Array.from(staffMap.values()).map((s) => {
+            const sorted = s.appointments.sort(
+              (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
+            );
+            return {
+              estheticianName: s.estheticianName,
+              boulevardStaffId: s.boulevardStaffId,
+              firstAppointment: sorted.length > 0
+                ? { time: sorted[0].time, clientName: sorted[0].clientName }
+                : null,
+              lastAppointment: sorted.length > 0
+                ? { time: sorted[sorted.length - 1].time, clientName: sorted[sorted.length - 1].clientName }
+                : null,
+            };
+          });
+
+          results.push({
+            locationId: loc.id,
+            locationName: loc.name,
+            marketName: loc.marketName,
+            staff,
+          });
+        } catch (locErr: any) {
+          console.error(`Failed to fetch appointments for ${loc.name}: ${locErr.message}`);
+          results.push({
+            locationId: loc.id,
+            locationName: loc.name,
+            marketName: loc.marketName,
+            staff: [],
+            error: locErr.message,
+          });
+        }
+      }
+
+      res.json(results);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

@@ -14,6 +14,9 @@ import {
   Settings,
   Terminal,
   Flag,
+  Clock,
+  Calendar,
+  MessageSquare,
 } from "lucide-react";
 import {
   Sidebar,
@@ -32,11 +35,14 @@ import helloSugarLogo from "@/assets/hello-sugar-logo.png";
 
 const mainItems = [
   { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
+  { title: "Active Shifts", url: "/admin/active-shifts", icon: Clock },
+  { title: "Daily Schedule", url: "/admin/daily-schedule", icon: Calendar },
   { title: "Shift Counts", url: "/admin/shifts", icon: Calculator },
   { title: "Receipts", url: "/admin/receipts", icon: Receipt },
   { title: "Alerts", url: "/admin/alerts", icon: Bell },
   { title: "Collections", url: "/admin/collections", icon: Wallet },
   { title: "Reports", url: "/admin/cleanliness-reports", icon: Flag },
+  { title: "SMS Log", url: "/admin/sms-log", icon: MessageSquare },
 ];
 
 const dataItems = [

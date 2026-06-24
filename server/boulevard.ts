@@ -285,6 +285,7 @@ export interface BoulevardAppointment {
   startAt: string;
   endAt: string;
   state: string;
+  client?: { firstName: string; lastName: string } | null;
   appointmentServices: { staff: { id: string; firstName: string; lastName: string } }[];
 }
 
@@ -306,6 +307,7 @@ export async function fetchAppointmentsForLocation(
         edges {
           node {
             id startAt endAt state
+            client { firstName lastName }
             appointmentServices {
               staff { id firstName lastName }
             }
