@@ -958,12 +958,14 @@ export async function registerRoutes(
                 message: "A start-of-day count must be submitted before the end-of-day count.",
               });
             }
-            // Flagship: only one end count per day
-            const hasEnd = await storage.hasLocationEndCountToday(container.locationId, todayStart);
-            if (hasEnd) {
-              return res.status(400).json({
-                message: "An end-of-day count has already been submitted for this location today.",
-              });
+            // Flagship: only one end count per day (skip for recounts)
+            if (!discrepancyNote?.startsWith("[RECOUNT]")) {
+              const hasEnd = await storage.hasLocationEndCountToday(container.locationId, todayStart);
+              if (hasEnd) {
+                return res.status(400).json({
+                  message: "An end-of-day count has already been submitted for this location today.",
+                });
+              }
             }
           } else {
             const hasStart = await storage.hasStartShiftToday(estheticianId, container.locationId, todayStart);
@@ -1016,8 +1018,9 @@ export async function registerRoutes(
         }
       }
 
-      // Prevent duplicate start counts
-      if (type === "start") {
+      // Prevent duplicate start counts (skip check for recounts)
+      const isRecountSubmission = discrepancyNote?.startsWith("[RECOUNT]");
+      if (type === "start" && !isRecountSubmission) {
         const container = await storage.getContainer(containerId);
         if (container) {
           const loc = await storage.getLocation(container.locationId);
