@@ -726,7 +726,13 @@ export async function registerRoutes(
       res.json({ amount: parsed.amount || null });
     } catch (err: any) {
       console.error("OCR error:", err);
-      res.json({ amount: null, message: "Could not read receipt" });
+      let message = "Could not read receipt";
+      if (err?.status === 429 || err?.message?.includes("quota")) {
+        message = "Receipt reader is temporarily unavailable. Please enter the amount manually.";
+      } else if (err?.message?.includes("Could not process image") || err?.message?.includes("invalid")) {
+        message = "The photo wasn't clear enough to read. Try taking a clearer photo, or enter the amount manually.";
+      }
+      res.json({ amount: null, message });
     }
   });
 

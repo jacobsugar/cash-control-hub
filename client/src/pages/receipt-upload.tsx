@@ -136,7 +136,11 @@ export default function ReceiptUploadPage() {
               setOcrApplied(true);
               toast({ title: "Amount detected", description: `$${data.amount} was read from your receipt. You can update it if needed.` });
             } else {
-              toast({ title: "Could not read amount", description: "Please enter the receipt amount manually.", variant: "destructive" });
+              toast({
+                title: "Could not read amount",
+                description: data.message || "Please enter the receipt amount manually.",
+                variant: "destructive",
+              });
             }
           }
         } catch {
