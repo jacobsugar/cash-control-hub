@@ -27,6 +27,7 @@ import CleanlinessReportsPage from "@/pages/admin/cleanliness-reports";
 import ActiveShiftsPage from "@/pages/admin/active-shifts";
 import DailySchedulePage from "@/pages/admin/daily-schedule";
 import SmsLogPage from "@/pages/admin/sms-log";
+import ShiftMonitorPage from "@/pages/admin/shift-monitor";
 import { useAdminAuth } from "@/hooks/use-admin-auth";
 import { Loader2 } from "lucide-react";
 
@@ -62,6 +63,7 @@ function AdminRouter() {
         <Route path="/admin/users" component={AdminUsersPage} />
         <Route path="/admin/settings" component={SettingsPage} />
         <Route path="/admin/cleanliness-reports" component={CleanlinessReportsPage} />
+        <Route path="/admin/shift-monitor" component={ShiftMonitorPage} />
         <Route path="/admin/active-shifts" component={ActiveShiftsPage} />
         <Route path="/admin/daily-schedule" component={DailySchedulePage} />
         <Route path="/admin/sms-log" component={SmsLogPage} />

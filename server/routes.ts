@@ -600,12 +600,15 @@ async function startBoulevardAutoSync() {
     const activeLocations = mappedLocations.filter(l => l.active && l.boulevardLocationId);
     const appointmentCache = new Map<number, any[]>();
 
+    console.log(`Shift check cycle: ${activeLocations.length} active locations, operating hours: ${withinOperatingHours}`);
+
     for (const loc of activeLocations) {
       try {
         const appts = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId!, new Date());
         appointmentCache.set(loc.id, appts);
-      } catch (e) {
-        console.warn(`Failed to fetch appointments for ${loc.name}:`, e);
+        console.log(`Fetched ${appts.length} appointments for ${loc.name}`);
+      } catch (e: any) {
+        console.warn(`Failed to fetch appointments for ${loc.name}: ${e.message}`);
       }
     }
 
@@ -2117,6 +2120,152 @@ export async function registerRoutes(
       }
 
       res.json(results);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Shift Monitor: real-time view of all shift statuses ──────────
+  app.get("/api/admin/shift-monitor", requireAdmin, async (_req, res) => {
+    try {
+      const mappedLocations = (await storage.getBoulevardMappedLocations()).filter(
+        (l) => l.active && l.boulevardLocationId
+      );
+      const now = new Date();
+      const locations: any[] = [];
+
+      for (const loc of mappedLocations) {
+        const tz = loc.timezone || "America/Chicago";
+        const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz });
+        const todayStart = new Date(todayStr + "T00:00:00");
+
+        let appointments: any[] = [];
+        try {
+          appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId!, now);
+        } catch (e: any) {
+          console.warn(`Shift monitor: failed to fetch appointments for ${loc.name}: ${e.message}`);
+        }
+
+        // Build per-staff appointment data for today
+        const staffMap = new Map<string, {
+          staffName: string;
+          staffId: string;
+          firstAppt: { time: Date; clientName: string } | null;
+          lastAppt: { time: Date; clientName: string } | null;
+        }>();
+
+        for (const appt of appointments) {
+          if (appt.state === "CANCELLED") continue;
+          const startAt = new Date(appt.startAt);
+          if (startAt.toLocaleDateString("en-CA", { timeZone: tz }) !== todayStr) continue;
+          const endAt = new Date(appt.endAt);
+          const clientName = appt.client
+            ? `${appt.client.firstName || ""} ${appt.client.lastName || ""}`.trim()
+            : "Walk-in";
+
+          for (const svc of appt.appointmentServices) {
+            const sid = svc.staff?.id;
+            if (!sid) continue;
+            const sName = `${svc.staff.firstName || ""} ${svc.staff.lastName || ""}`.trim();
+
+            if (!staffMap.has(sid)) {
+              staffMap.set(sid, { staffName: sName, staffId: sid, firstAppt: null, lastAppt: null });
+            }
+            const entry = staffMap.get(sid)!;
+            if (!entry.firstAppt || startAt < entry.firstAppt.time) {
+              entry.firstAppt = { time: startAt, clientName };
+            }
+            if (!entry.lastAppt || endAt > entry.lastAppt.time) {
+              entry.lastAppt = { time: endAt, clientName };
+            }
+          }
+        }
+
+        // Get containers for this location
+        const containers = await storage.getContainersByLocation(loc.id);
+
+        const staffStatuses: any[] = [];
+        for (const [blvdStaffId, staffData] of staffMap) {
+          const esth = await storage.getEstheticianByBoulevardId(blvdStaffId);
+          if (!esth || !esth.active) continue;
+
+          // Check for start/end counts today
+          const startCount = await db.execute(sql`
+            SELECT sc.counted_amount, sc.created_at FROM shift_counts sc
+            JOIN containers c ON sc.container_id = c.id
+            WHERE sc.esthetician_id = ${esth.id}
+              AND c.location_id = ${loc.id}
+              AND sc.type = 'start'
+              AND sc.created_at > ${todayStart.toISOString()}
+              AND (sc.discrepancy_note IS NULL OR sc.discrepancy_note NOT LIKE '[RECOUNT]%')
+            ORDER BY sc.created_at DESC LIMIT 1
+          `);
+
+          const endCount = await db.execute(sql`
+            SELECT sc.counted_amount, sc.created_at FROM shift_counts sc
+            JOIN containers c ON sc.container_id = c.id
+            WHERE sc.esthetician_id = ${esth.id}
+              AND c.location_id = ${loc.id}
+              AND sc.type = 'end'
+              AND sc.created_at > ${todayStart.toISOString()}
+              AND (sc.discrepancy_note IS NULL OR sc.discrepancy_note NOT LIKE '[RECOUNT]%')
+            ORDER BY sc.created_at DESC LIMIT 1
+          `);
+
+          // Check reminder status
+          const startReminderSent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "late_start", todayStart);
+          const endReminderSent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "missing_end_reminder", todayStart);
+          const endAlertSent = await storage.hasShiftReminderBeenSent(esth.id, loc.id, "missing_end", todayStart);
+
+          const firstApptTime = staffData.firstAppt?.time || null;
+          const lastApptTime = staffData.lastAppt?.time || null;
+
+          const startRow = startCount.rows[0] as any;
+          const endRow = endCount.rows[0] as any;
+
+          // Find which container this esthetician is using
+          const containerName = containers.length === 1 ? containers[0].name : (containers[0]?.name || "");
+
+          staffStatuses.push({
+            estheticianName: esth.name,
+            estheticianId: esth.id,
+            phone: esth.phone,
+            locationName: loc.name,
+            marketName: loc.marketName,
+            containerName,
+            firstAppointment: firstApptTime?.toISOString() || null,
+            lastAppointment: lastApptTime?.toISOString() || null,
+            firstClientName: staffData.firstAppt?.clientName || null,
+            lastClientName: staffData.lastAppt?.clientName || null,
+            startCount: startRow ? { time: startRow.created_at, amount: startRow.counted_amount } : null,
+            endCount: endRow ? { time: endRow.created_at, amount: endRow.counted_amount } : null,
+            startDeadline: firstApptTime ? new Date(firstApptTime.getTime() + 15 * 60 * 1000).toISOString() : null,
+            endReminderDeadline: lastApptTime ? new Date(lastApptTime.getTime() + 15 * 60 * 1000).toISOString() : null,
+            endAlertDeadline: lastApptTime ? new Date(lastApptTime.getTime() + 60 * 60 * 1000).toISOString() : null,
+            startReminderSent,
+            endReminderSent,
+            endAlertSent,
+          });
+        }
+
+        // Sort: incomplete counts first, then by first appointment time
+        staffStatuses.sort((a: any, b: any) => {
+          const aComplete = a.startCount && a.endCount ? 1 : 0;
+          const bComplete = b.startCount && b.endCount ? 1 : 0;
+          if (aComplete !== bComplete) return aComplete - bComplete;
+          return (a.firstAppointment || "").localeCompare(b.firstAppointment || "");
+        });
+
+        locations.push({
+          locationId: loc.id,
+          locationName: loc.name,
+          marketName: loc.marketName,
+          type: loc.type,
+          staff: staffStatuses,
+        });
+      }
+
+      res.json({ locations, lastCheckedAt: now.toISOString() });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

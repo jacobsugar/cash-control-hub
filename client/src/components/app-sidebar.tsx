@@ -17,6 +17,7 @@ import {
   Clock,
   Calendar,
   MessageSquare,
+  Activity,
 } from "lucide-react";
 import {
   Sidebar,
@@ -35,6 +36,7 @@ import helloSugarLogo from "@/assets/hello-sugar-logo.png";
 
 const mainItems = [
   { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
+  { title: "Shift Monitor", url: "/admin/shift-monitor", icon: Activity },
   { title: "Active Shifts", url: "/admin/active-shifts", icon: Clock },
   { title: "Daily Schedule", url: "/admin/daily-schedule", icon: Calendar },
   { title: "Shift Counts", url: "/admin/shifts", icon: Calculator },
