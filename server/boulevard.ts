@@ -320,7 +320,12 @@ export async function fetchAppointmentsForLocation(
   const allAppointments: BoulevardAppointment[] = [];
   let cursor: string | null = null;
 
-  for (let page = 0; page < 100; page++) {
+  // Paginate until we pass the target date or run out of data
+  // With ~50 appointments per page, 500 pages = 25,000 appointments max
+  for (let page = 0; page < 500; page++) {
+    if (page > 0 && page % 50 === 0) {
+      console.log(`Appointment fetch page ${page} for location ${locationId}, found ${allAppointments.length} so far...`);
+    }
     const data: any = await graphql(
       `query($locationId: ID!, $after: String) {
         appointments(first: 50, locationId: $locationId, after: $after) {
