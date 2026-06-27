@@ -5,7 +5,7 @@ import {
   markets, locations, containers, estheticians, estheticianLocations, shiftCounts, receipts,
   boulevardTransactions, alerts, cashCollections, adminUsers, alertRecipients, appSettings,
   boulevardSyncHistory, adminUserMarkets, shiftReminders,
-  cleanlinessReports, cleanlinessReportPhotos,
+  cleanlinessReports, cleanlinessReportPhotos, cachedAppointments,
   type InsertMarket, type InsertLocation, type InsertContainer, type InsertEsthetician,
   type InsertShiftCount, type InsertReceipt, type InsertBoulevardTransaction,
   type InsertAlert, type InsertCashCollection, type InsertAdminUser,

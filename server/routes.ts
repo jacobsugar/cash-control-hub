@@ -1,8 +1,8 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage, db } from "./storage";
-import { cleanlinessReports } from "@shared/schema";
-import { eq, sql } from "drizzle-orm";
+import { cleanlinessReports, cachedAppointments } from "@shared/schema";
+import { eq, sql, and, gte, lte } from "drizzle-orm";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -498,6 +498,74 @@ async function syncAllBoulevardLocations(syncType: "auto" | "manual" = "auto", a
   return { totalImported, locations: results };
 }
 
+/**
+ * Sync today's appointments from Boulevard into the cached_appointments table.
+ * Paginates through ALL appointments (oldest-first) until we pass today's date.
+ * Only runs for active locations. Replaces existing cache for each location/day.
+ */
+async function syncAppointmentsCache() {
+  const mappedLocations = (await storage.getBoulevardMappedLocations()).filter(l => l.active && l.boulevardLocationId);
+  const now = new Date();
+
+  for (const loc of mappedLocations) {
+    const tz = loc.timezone || "America/Chicago";
+    const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz });
+    // Build UTC boundaries for today in the location's timezone
+    const startOfDayLocal = new Date(now.toLocaleString("en-US", { timeZone: tz }).replace(/,/, ""));
+    startOfDayLocal.setHours(0, 0, 0, 0);
+    // Convert back to UTC by getting the offset
+    const utcStartStr = todayStr + "T00:00:00";
+    const utcEndStr = todayStr + "T23:59:59";
+
+    try {
+      const appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId!, now);
+
+      // Delete old cache for this location for today
+      await db.delete(cachedAppointments).where(
+        and(
+          eq(cachedAppointments.locationId, loc.id),
+          gte(cachedAppointments.startAt, new Date(utcStartStr)),
+        )
+      );
+
+      let cached = 0;
+      for (const appt of appointments) {
+        if (appt.state === "CANCELLED") continue;
+        const startAt = new Date(appt.startAt);
+        // Only cache today's appointments (using location timezone)
+        if (startAt.toLocaleDateString("en-CA", { timeZone: tz }) !== todayStr) continue;
+
+        const clientName = appt.client
+          ? `${appt.client.firstName || ""} ${appt.client.lastName || ""}`.trim()
+          : "Walk-in";
+
+        for (const svc of appt.appointmentServices) {
+          const staffId = svc.staff?.id;
+          if (!staffId) continue;
+          const staffName = `${svc.staff.firstName || ""} ${svc.staff.lastName || ""}`.trim();
+
+          try {
+            await db.execute(sql`
+              INSERT INTO cached_appointments (location_id, boulevard_appointment_id, staff_boulevard_id, staff_name, client_name, start_at, end_at, state, synced_at)
+              VALUES (${loc.id}, ${appt.id}, ${staffId}, ${staffName}, ${clientName}, ${appt.startAt}, ${appt.endAt}, ${appt.state}, NOW())
+              ON CONFLICT (boulevard_appointment_id, staff_boulevard_id) DO UPDATE SET
+                client_name = EXCLUDED.client_name,
+                start_at = EXCLUDED.start_at,
+                end_at = EXCLUDED.end_at,
+                state = EXCLUDED.state,
+                synced_at = NOW()
+            `);
+            cached++;
+          } catch { /* ignore duplicate */ }
+        }
+      }
+      console.log(`Cached ${cached} appointments for ${loc.name}`);
+    } catch (e: any) {
+      console.warn(`Failed to sync appointments for ${loc.name}: ${e.message}`);
+    }
+  }
+}
+
 async function syncStaffFromBoulevard() {
   const mappedLocations = await storage.getBoulevardMappedLocations();
   const blvdLocationIds = new Set(mappedLocations.map(l => l.boulevardLocationId).filter(Boolean));
@@ -595,21 +663,39 @@ async function startBoulevardAutoSync() {
       }
     }
 
-    // Fetch appointments once for active locations, share between checks
+    // Sync today's appointments into the database cache
+    try {
+      await syncAppointmentsCache();
+    } catch (err) {
+      console.error("Appointment cache sync error:", err);
+    }
+
+    // Build appointment data from the DB cache for the checks
     const mappedLocations = await storage.getBoulevardMappedLocations();
     const activeLocations = mappedLocations.filter(l => l.active && l.boulevardLocationId);
     const appointmentCache = new Map<number, any[]>();
 
-    console.log(`Shift check cycle: ${activeLocations.length} active locations, operating hours: ${withinOperatingHours}`);
-
     for (const loc of activeLocations) {
-      try {
-        const appts = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId!, new Date());
-        appointmentCache.set(loc.id, appts);
-        console.log(`Fetched ${appts.length} appointments for ${loc.name}`);
-      } catch (e: any) {
-        console.warn(`Failed to fetch appointments for ${loc.name}: ${e.message}`);
-      }
+      const tz = loc.timezone || "America/Chicago";
+      const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+      const rows = await db.execute(sql`
+        SELECT boulevard_appointment_id as id, staff_boulevard_id, staff_name, client_name,
+               start_at as "startAt", end_at as "endAt", state
+        FROM cached_appointments
+        WHERE location_id = ${loc.id}
+        ORDER BY start_at
+      `);
+      // Transform DB rows into the appointment format the check functions expect
+      const appts = rows.rows.map((r: any) => ({
+        id: r.id,
+        startAt: r.startAt,
+        endAt: r.endAt,
+        state: r.state,
+        client: { firstName: (r.client_name || "").split(" ")[0], lastName: (r.client_name || "").split(" ").slice(1).join(" ") },
+        appointmentServices: [{ staff: { id: r.staff_boulevard_id, firstName: (r.staff_name || "").split(" ")[0], lastName: (r.staff_name || "").split(" ").slice(1).join(" ") } }],
+      }));
+      appointmentCache.set(loc.id, appts);
+      console.log(`Shift check: ${appts.length} cached appointments for ${loc.name}`);
     }
 
     // Start-of-shift reminders (only during operating hours)
@@ -2041,48 +2127,35 @@ export async function registerRoutes(
 
       for (const loc of mappedLocations) {
         try {
-          const tz = loc.timezone || "America/Chicago";
-          const todayStr = today.toLocaleDateString("en-CA", { timeZone: tz });
+          // Read from DB cache
+          const cachedRows = await db.execute(sql`
+            SELECT staff_boulevard_id, staff_name, client_name, start_at
+            FROM cached_appointments
+            WHERE location_id = ${loc.id}
+            ORDER BY start_at
+          `);
 
-          const appointments = await boulevard.fetchAppointmentsForLocation(
-            loc.boulevardLocationId!,
-            today
-          );
-
-          // Group by staff member — only today's non-cancelled appointments
           const staffMap = new Map<string, {
             estheticianName: string;
             boulevardStaffId: string;
             appointments: { time: string; clientName: string }[];
           }>();
 
-          for (const appt of appointments) {
-            if (appt.state === "CANCELLED") continue;
-            // Filter to today only
-            const apptDate = new Date(appt.startAt).toLocaleDateString("en-CA", { timeZone: tz });
-            if (apptDate !== todayStr) continue;
+          for (const row of cachedRows.rows as any[]) {
+            const staffId = row.staff_boulevard_id;
+            if (!staffId) continue;
 
-            const clientName = appt.client
-              ? `${appt.client.firstName || ""} ${appt.client.lastName || ""}`.trim()
-              : "Walk-in";
-
-            for (const svc of appt.appointmentServices) {
-              const staffId = svc.staff?.id;
-              if (!staffId) continue;
-              const staffName = `${svc.staff.firstName || ""} ${svc.staff.lastName || ""}`.trim();
-
-              if (!staffMap.has(staffId)) {
-                staffMap.set(staffId, {
-                  estheticianName: staffName,
-                  boulevardStaffId: staffId,
-                  appointments: [],
-                });
-              }
-              staffMap.get(staffId)!.appointments.push({
-                time: appt.startAt,
-                clientName,
+            if (!staffMap.has(staffId)) {
+              staffMap.set(staffId, {
+                estheticianName: row.staff_name || "",
+                boulevardStaffId: staffId,
+                appointments: [],
               });
             }
+            staffMap.get(staffId)!.appointments.push({
+              time: row.start_at,
+              clientName: row.client_name || "Walk-in",
+            });
           }
 
           // Determine first and last appointment per staff
@@ -2140,14 +2213,15 @@ export async function registerRoutes(
         const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz });
         const todayStart = new Date(todayStr + "T00:00:00");
 
-        let appointments: any[] = [];
-        try {
-          appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId!, now);
-        } catch (e: any) {
-          console.warn(`Shift monitor: failed to fetch appointments for ${loc.name}: ${e.message}`);
-        }
+        // Read from DB cache instead of live API
+        const cachedRows = await db.execute(sql`
+          SELECT staff_boulevard_id, staff_name, client_name, start_at, end_at
+          FROM cached_appointments
+          WHERE location_id = ${loc.id}
+          ORDER BY start_at
+        `);
 
-        // Build per-staff appointment data for today
+        // Build per-staff appointment data
         const staffMap = new Map<string, {
           staffName: string;
           staffId: string;
@@ -2155,30 +2229,23 @@ export async function registerRoutes(
           lastAppt: { time: Date; clientName: string } | null;
         }>();
 
-        for (const appt of appointments) {
-          if (appt.state === "CANCELLED") continue;
-          const startAt = new Date(appt.startAt);
-          if (startAt.toLocaleDateString("en-CA", { timeZone: tz }) !== todayStr) continue;
-          const endAt = new Date(appt.endAt);
-          const clientName = appt.client
-            ? `${appt.client.firstName || ""} ${appt.client.lastName || ""}`.trim()
-            : "Walk-in";
+        for (const row of cachedRows.rows as any[]) {
+          const startAt = new Date(row.start_at);
+          const endAt = new Date(row.end_at);
+          const clientName = row.client_name || "Walk-in";
+          const sid = row.staff_boulevard_id;
+          if (!sid) continue;
+          const sName = row.staff_name || "";
 
-          for (const svc of appt.appointmentServices) {
-            const sid = svc.staff?.id;
-            if (!sid) continue;
-            const sName = `${svc.staff.firstName || ""} ${svc.staff.lastName || ""}`.trim();
-
-            if (!staffMap.has(sid)) {
-              staffMap.set(sid, { staffName: sName, staffId: sid, firstAppt: null, lastAppt: null });
-            }
-            const entry = staffMap.get(sid)!;
-            if (!entry.firstAppt || startAt < entry.firstAppt.time) {
-              entry.firstAppt = { time: startAt, clientName };
-            }
-            if (!entry.lastAppt || endAt > entry.lastAppt.time) {
-              entry.lastAppt = { time: endAt, clientName };
-            }
+          if (!staffMap.has(sid)) {
+            staffMap.set(sid, { staffName: sName, staffId: sid, firstAppt: null, lastAppt: null });
+          }
+          const entry = staffMap.get(sid)!;
+          if (!entry.firstAppt || startAt < entry.firstAppt.time) {
+            entry.firstAppt = { time: startAt, clientName };
+          }
+          if (!entry.lastAppt || endAt > entry.lastAppt.time) {
+            entry.lastAppt = { time: endAt, clientName };
           }
         }
 

@@ -212,6 +212,19 @@ export const boulevardSyncHistory = pgTable("boulevard_sync_history", {
   completedAt: timestamp("completed_at"),
 });
 
+export const cachedAppointments = pgTable("cached_appointments", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  locationId: integer("location_id").notNull().references(() => locations.id),
+  boulevardAppointmentId: text("boulevard_appointment_id").notNull(),
+  staffBoulevardId: text("staff_boulevard_id").notNull(),
+  staffName: text("staff_name").notNull(),
+  clientName: text("client_name"),
+  startAt: timestamp("start_at").notNull(),
+  endAt: timestamp("end_at").notNull(),
+  state: text("state").notNull(),
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+});
+
 // Insert schemas
 export const insertMarketSchema = createInsertSchema(markets).omit({ id: true, createdAt: true });
 export const insertLocationSchema = createInsertSchema(locations).omit({ id: true, createdAt: true });
