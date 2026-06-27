@@ -1978,6 +1978,7 @@ export async function registerRoutes(
           e.name AS "estheticianName",
           e.phone,
           l.name AS "locationName",
+          l.timezone AS "timezone",
           m.name AS "marketName",
           c.name AS "containerName",
           sc.created_at AS "startCountTime"

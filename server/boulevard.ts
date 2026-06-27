@@ -305,7 +305,8 @@ export interface BoulevardAppointment {
 }
 
 /**
- * Fetch appointments for a location on a given date
+ * Fetch appointments for a location on a given date.
+ * Paginates through results and stops once we've gone past the target date.
  */
 export async function fetchAppointmentsForLocation(
   locationId: string,
@@ -316,24 +317,52 @@ export async function fetchAppointmentsForLocation(
   const endOfDay = new Date(date);
   endOfDay.setHours(23, 59, 59, 999);
 
-  return fetchAllPages<BoulevardAppointment>(
-    `query($locationId: ID!, $after: String) {
-      appointments(first: 50, locationId: $locationId, after: $after) {
-        edges {
-          node {
-            id startAt endAt state
-            client { firstName lastName }
-            appointmentServices {
-              staff { id firstName lastName }
+  const allAppointments: BoulevardAppointment[] = [];
+  let cursor: string | null = null;
+
+  for (let page = 0; page < 100; page++) {
+    const data: any = await graphql(
+      `query($locationId: ID!, $after: String) {
+        appointments(first: 50, locationId: $locationId, after: $after) {
+          edges {
+            node {
+              id startAt endAt state
+              client { firstName lastName }
+              appointmentServices {
+                staff { id firstName lastName }
+              }
             }
           }
+          pageInfo { hasNextPage endCursor }
         }
-        pageInfo { hasNextPage endCursor }
+      }`,
+      { locationId, after: cursor }
+    );
+
+    const edges = data.appointments?.edges || [];
+    if (edges.length === 0) break;
+
+    let foundFutureDate = false;
+    for (const edge of edges) {
+      const appt = edge.node;
+      const startAt = new Date(appt.startAt);
+
+      // Only include appointments that overlap with the target date
+      if (startAt <= endOfDay && new Date(appt.endAt) >= startOfDay) {
+        allAppointments.push(appt);
       }
-    }`,
-    { locationId },
-    "appointments"
-  );
+
+      // If we've gone past the target date, stop paginating
+      if (startAt > endOfDay) {
+        foundFutureDate = true;
+      }
+    }
+
+    if (foundFutureDate || !data.appointments?.pageInfo?.hasNextPage) break;
+    cursor = data.appointments.pageInfo.endCursor;
+  }
+
+  return allAppointments;
 }
 
 export function isConfigured(): boolean {

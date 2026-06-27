@@ -12,6 +12,7 @@ interface OpenCount {
   estheticianName: string;
   phone: string | null;
   locationName: string;
+  timezone: string;
   marketName: string;
   containerName: string;
   startCountTime: string;
@@ -95,7 +96,7 @@ export default function ActiveShiftsPage() {
                       <div className="text-right">
                         <p className="text-sm font-mono">{elapsed} ago</p>
                         <p className="text-xs text-muted-foreground">
-                          Started {new Date(oc.startCountTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          Started {new Date(oc.startCountTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: oc.timezone || "America/Los_Angeles" })}
                         </p>
                       </div>
                       {oc.phone && (
