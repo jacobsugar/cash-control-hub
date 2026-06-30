@@ -26,6 +26,24 @@ function getOpenAIClient(): OpenAI {
   return openaiClient;
 }
 
+/**
+ * Get midnight in a specific timezone as a UTC Date.
+ * e.g., getMidnightInTimezone("America/Los_Angeles") returns midnight PT as UTC.
+ */
+function getMidnightInTimezone(tz: string): Date {
+  const now = new Date();
+  const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz }); // "2026-06-30"
+  // Build a date string that JavaScript will interpret in the target timezone
+  // by using toLocaleString to find the UTC offset
+  const midnight = new Date(todayStr + "T00:00:00");
+  // Get the offset between UTC and the timezone
+  const utcMidnight = new Date(todayStr + "T00:00:00Z"); // midnight UTC
+  const tzTime = new Date(utcMidnight.toLocaleString("en-US", { timeZone: tz }));
+  const offsetMs = utcMidnight.getTime() - tzTime.getTime();
+  // Midnight in the timezone, expressed as UTC
+  return new Date(utcMidnight.getTime() + offsetMs);
+}
+
 // In-memory SMS log for debugging and auditing
 interface SmsLogEntry {
   recipientName: string;
@@ -281,7 +299,7 @@ async function checkShiftReminders(locations?: any[], appointmentCache?: Map<num
       // Get today's start in this location's timezone
       const tz = loc.timezone || "America/Chicago";
       const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz }); // YYYY-MM-DD
-      const todayStart = new Date(todayStr + "T00:00:00");
+      const todayStart = getMidnightInTimezone(tz);
 
       const appointments = appointmentCache?.get(loc.id);
       if (!appointments) continue;
@@ -510,12 +528,7 @@ async function syncAppointmentsCache() {
   for (const loc of mappedLocations) {
     const tz = loc.timezone || "America/Chicago";
     const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz });
-    // Build UTC boundaries for today in the location's timezone
-    const startOfDayLocal = new Date(now.toLocaleString("en-US", { timeZone: tz }).replace(/,/, ""));
-    startOfDayLocal.setHours(0, 0, 0, 0);
-    // Convert back to UTC by getting the offset
-    const utcStartStr = todayStr + "T00:00:00";
-    const utcEndStr = todayStr + "T23:59:59";
+    const todayStart = getMidnightInTimezone(tz);
 
     try {
       const appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId!, now);
@@ -524,7 +537,7 @@ async function syncAppointmentsCache() {
       await db.delete(cachedAppointments).where(
         and(
           eq(cachedAppointments.locationId, loc.id),
-          gte(cachedAppointments.startAt, new Date(utcStartStr)),
+          gte(cachedAppointments.startAt, todayStart),
         )
       );
 
@@ -1008,7 +1021,7 @@ export async function registerRoutes(
       const loc = await storage.getLocation(locationId);
       const tz = loc?.timezone || "America/Chicago";
       const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
-      const todayStart = new Date(todayStr + "T00:00:00");
+      const todayStart = getMidnightInTimezone(tz);
 
       // Flagship: check if anyone at the location submitted a start count
       // Suite: check if this specific esthetician did
@@ -1038,7 +1051,7 @@ export async function registerRoutes(
           const loc = await storage.getLocation(container.locationId);
           const tz = loc?.timezone || "America/Chicago";
           const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
-          const todayStart = new Date(todayStr + "T00:00:00");
+          const todayStart = getMidnightInTimezone(tz);
           const isFlagship = loc?.type === "flagship";
 
           // Require a start count before end count
@@ -1119,7 +1132,7 @@ export async function registerRoutes(
           const loc = await storage.getLocation(container.locationId);
           const tz = loc?.timezone || "America/Chicago";
           const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
-          const todayStart = new Date(todayStr + "T00:00:00");
+          const todayStart = getMidnightInTimezone(tz);
 
           if (loc?.type === "flagship") {
             // Flagship: one start count per location per day
@@ -2211,7 +2224,7 @@ export async function registerRoutes(
       for (const loc of mappedLocations) {
         const tz = loc.timezone || "America/Chicago";
         const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz });
-        const todayStart = new Date(todayStr + "T00:00:00");
+        const todayStart = getMidnightInTimezone(tz);
 
         // Read from DB cache instead of live API
         const cachedRows = await db.execute(sql`
@@ -2424,7 +2437,7 @@ async function checkMissingEndShifts(locations?: any[], appointmentCache?: Map<n
 
       const tz = loc.timezone || "America/Chicago";
       const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz });
-      const todayStart = new Date(todayStr + "T00:00:00");
+      const todayStart = getMidnightInTimezone(tz);
       const isFlagship = loc.type === "flagship";
 
       const appointments = appointmentCache?.get(loc.id);
