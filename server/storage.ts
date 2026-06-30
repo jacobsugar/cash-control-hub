@@ -819,7 +819,8 @@ export class DatabaseStorage implements IStorage {
         let sinceDate: Date | undefined;
 
         if (collectionTime > shiftTime) {
-          baseAmount = "0.00";
+          // After collection, use current balance (collected amount was already subtracted)
+          baseAmount = c.currentBalance || "0.00";
           sinceDate = new Date(lastCollection.created_at);
         } else {
           baseAmount = lastShift?.counted_amount || c.currentBalance || "0.00";

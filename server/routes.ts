@@ -1022,7 +1022,9 @@ export async function registerRoutes(
       let sinceDate: Date | undefined;
 
       if (collectionTime > shiftTime) {
-        priorAmount = "0.00";
+        // After a collection, the remaining balance is the current container balance
+        // (collected amount was already subtracted when the collection was recorded)
+        priorAmount = container.currentBalance || "0.00";
         sinceDate = new Date(lastCollection!.createdAt);
       } else {
         priorAmount = last?.countedAmount || container.currentBalance || "0.00";
