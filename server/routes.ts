@@ -69,7 +69,36 @@ function formatPhoneE164(phone: string): string {
   return `+${digits}`;
 }
 
-function buildAlertMessage(alertData: {
+// In-memory template cache (refreshed every 5 minutes)
+let smsTemplateCache: Record<string, string> = {};
+let smsTemplateCacheExpiry = 0;
+
+async function getSmsTemplate(key: string, fallback: string): Promise<string> {
+  if (Date.now() > smsTemplateCacheExpiry) {
+    const settings = await storage.getSettings();
+    smsTemplateCache = {};
+    for (const s of settings) {
+      if (s.key.startsWith("sms_tpl_")) smsTemplateCache[s.key] = s.value;
+    }
+    smsTemplateCacheExpiry = Date.now() + 5 * 60 * 1000;
+  }
+  return smsTemplateCache[key] || fallback;
+}
+
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  let result = template;
+  for (const [key, value] of Object.entries(vars)) {
+    result = result.replaceAll(`{${key}}`, value);
+  }
+  return result;
+}
+
+async function buildReminderMessage(templateKey: string, fallback: string, vars: Record<string, string>): Promise<string> {
+  const template = await getSmsTemplate(templateKey, fallback);
+  return fillTemplate(template, vars);
+}
+
+async function buildAlertMessage(alertData: {
   type: string;
   staffName?: string | null;
   locationName?: string | null;
@@ -77,27 +106,31 @@ function buildAlertMessage(alertData: {
   expectedAmount?: string | null;
   actualAmount?: string | null;
   note?: string | null;
-}): string {
-  const loc = alertData.locationName || "Unknown location";
-  const container = alertData.containerName ? ` (${alertData.containerName})` : "";
-  const staff = alertData.staffName || "Unknown";
+}): Promise<string> {
+  const vars: Record<string, string> = {
+    location: alertData.locationName || "Unknown location",
+    container: alertData.containerName ? ` (${alertData.containerName})` : "",
+    staff: alertData.staffName || "Unknown",
+    expected: alertData.expectedAmount || "0",
+    actual: alertData.actualAmount || "0",
+    note: alertData.note || "",
+    note_suffix: alertData.note ? ` Note: ${alertData.note}` : "",
+  };
 
-  switch (alertData.type) {
-    case "start_mismatch":
-      return `CashControl Alert: Cash discrepancy at ${loc}${container}. Expected $${alertData.expectedAmount}, counted $${alertData.actualAmount} by ${staff}.${alertData.note ? ` Note: ${alertData.note}` : ""}`;
-    case "receipt_submitted":
-      return `CashControl: Receipt submitted at ${loc}${container} for $${alertData.actualAmount} by ${staff}.${alertData.note ? ` Note: ${alertData.note}` : ""}`;
-    case "missing_end_shift":
-      return `CashControl Alert: Missing end-of-shift count at ${loc}${container}. Started by ${staff} but no end count recorded.`;
-    case "collection_mismatch":
-      return `CashControl Alert: Collection discrepancy at ${loc}${container}. Expected $${alertData.expectedAmount}, collected $${alertData.actualAmount} by ${staff}.${alertData.note ? ` Note: ${alertData.note}` : ""}`;
-    case "cleanliness_report":
-      return `CashControl: Cleanliness issue reported at ${loc} by ${staff}.${alertData.note ? ` Note: ${alertData.note}` : ""}`;
-    case "cleanliness_escalation":
-      return `CashControl ESCALATION: Unresolved cleanliness report at ${loc} (reported by ${staff}) has been open for over 24 hours.${alertData.note ? ` Note: ${alertData.note}` : ""}`;
-    default:
-      return `CashControl Alert: ${alertData.type} at ${loc}${container}.`;
-  }
+  const defaults: Record<string, string> = {
+    start_mismatch: "CashControl Alert: Cash discrepancy at {location}{container}. Expected ${expected}, counted ${actual} by {staff}.{note_suffix}",
+    end_mismatch: "CashControl Alert: Cash discrepancy at {location}{container}. Expected ${expected}, counted ${actual} by {staff}.{note_suffix}",
+    missing_end_shift: "CashControl Alert: Missing end-of-shift count at {location}{container}. {staff} has not submitted their count.",
+    receipt_submitted: "CashControl: Receipt submitted at {location}{container} for ${actual} by {staff}.{note_suffix}",
+    missing_receipt: "CashControl Alert: Cash spent without receipt at {location}{container} for ${actual} by {staff}.{note_suffix}",
+    collection_mismatch: "CashControl Alert: Collection discrepancy at {location}{container}. Expected ${expected}, collected ${actual} by {staff}.{note_suffix}",
+    cleanliness_report: "CashControl: Cleanliness issue reported at {location} by {staff}.{note_suffix}",
+    cleanliness_escalation: "CashControl ESCALATION: Unresolved cleanliness report at {location} (reported by {staff}) has been open for over 24 hours.{note_suffix}",
+  };
+
+  const fallback = defaults[alertData.type] || "CashControl Alert: {type} at {location}{container}.";
+  const template = await getSmsTemplate(`sms_tpl_${alertData.type}`, fallback);
+  return fillTemplate(template, { ...vars, type: alertData.type });
 }
 
 // Cache for OpenPhone userId resolution (rarely changes)
@@ -162,7 +195,7 @@ async function sendAlertSms(alertData: {
       return;
     }
 
-    const message = buildAlertMessage(alertData);
+    const message = await buildAlertMessage(alertData);
     const fromNumber = formatPhoneE164(fromNumberRaw);
 
     // Resolve userId with caching
@@ -354,7 +387,7 @@ async function checkShiftReminders(locations?: any[], appointmentCache?: Map<num
 
           await sendPersonalSms(
             esth.phone,
-            `Hi ${esth.name.split(" ")[0]}, please submit the start-of-day cash count for ${loc.name}. Count the till and submit via CashControl.`
+            await buildReminderMessage("sms_tpl_start_reminder_flagship", "Hi {first_name}, please submit the start-of-day cash count for {location}. Count the till and submit via CashControl.", { first_name: esth.name.split(" ")[0], location: loc.name })
           );
           await storage.createShiftReminder({
             estheticianId: esth.id,
@@ -381,7 +414,7 @@ async function checkShiftReminders(locations?: any[], appointmentCache?: Map<num
 
           await sendPersonalSms(
             esth.phone,
-            `Hi ${esth.name.split(" ")[0]}, please submit your start-of-shift cash count. Count your drawer and submit via CashControl.`
+            await buildReminderMessage("sms_tpl_start_reminder_suite", "Hi {first_name}, please submit your start-of-shift cash count. Count your drawer and submit via CashControl.", { first_name: esth.name.split(" ")[0], location: loc.name })
           );
           await storage.createShiftReminder({
             estheticianId: esth.id,
@@ -1976,6 +2009,22 @@ export async function registerRoutes(
     }
   });
 
+  // SMS template update (accessible to all admins, not just owners)
+  app.post("/api/admin/sms-templates", requireAdmin, async (req, res) => {
+    try {
+      const { key, value } = req.body;
+      if (!key?.startsWith("sms_tpl_")) {
+        return res.status(400).json({ message: "Invalid template key" });
+      }
+      await storage.upsertSetting(key, value);
+      // Clear template cache
+      smsTemplateCacheExpiry = 0;
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // Admin logs endpoint — supports session auth or token auth
   app.get("/api/admin/logs", async (req, res) => {
     const token = req.query.token as string;
@@ -2120,7 +2169,7 @@ export async function registerRoutes(
 
       await sendPersonalSms(
         esth.phone,
-        `Hi ${esth.name.split(" ")[0]}, this is a reminder to submit your end-of-shift cash count for ${locationName}. Please count your drawer and submit via CashControl.`
+        await buildReminderMessage("sms_tpl_manual_reminder", "Hi {first_name}, this is a reminder to submit your end-of-shift cash count for {location}. Please count your drawer and submit via CashControl.", { first_name: esth.name.split(" ")[0], location: locationName })
       );
 
       res.json({ success: true, message: `Reminder sent to ${esth.name}` });
@@ -2495,7 +2544,7 @@ async function checkMissingEndShifts(locations?: any[], appointmentCache?: Map<n
             if (esth.phone) {
               await sendPersonalSms(
                 esth.phone,
-                `Hi ${esth.name.split(" ")[0]}, the last appointment at ${loc.name} has ended. Please submit the end-of-day cash count via CashControl.`
+                await buildReminderMessage("sms_tpl_end_reminder_15min_flagship", "Hi {first_name}, the last appointment at {location} has ended. Please submit the end-of-day cash count via CashControl.", { first_name: esth.name.split(" ")[0], location: loc.name })
               );
             }
             await storage.createShiftReminder({
@@ -2520,7 +2569,7 @@ async function checkMissingEndShifts(locations?: any[], appointmentCache?: Map<n
             if (esth.phone) {
               await sendPersonalSms(
                 esth.phone,
-                `Hi ${esth.name.split(" ")[0]}, your end-of-day cash count at ${loc.name} is now overdue. Your manager has been notified. Please submit immediately via CashControl.`
+                await buildReminderMessage("sms_tpl_end_reminder_60min_flagship", "Hi {first_name}, your end-of-day cash count at {location} is now overdue. Your manager has been notified. Please submit immediately via CashControl.", { first_name: esth.name.split(" ")[0], location: loc.name })
               );
             }
             await storage.createShiftReminder({
@@ -2573,7 +2622,7 @@ async function checkMissingEndShifts(locations?: any[], appointmentCache?: Map<n
             if (esth.phone) {
               await sendPersonalSms(
                 esth.phone,
-                `Hi ${esth.name.split(" ")[0]}, your last appointment has ended. Please submit your end-of-shift cash count via CashControl.`
+                await buildReminderMessage("sms_tpl_end_reminder_15min_suite", "Hi {first_name}, your last appointment has ended. Please submit your end-of-shift cash count via CashControl.", { first_name: esth.name.split(" ")[0], location: loc.name })
               );
             }
             await storage.createShiftReminder({
@@ -2593,7 +2642,7 @@ async function checkMissingEndShifts(locations?: any[], appointmentCache?: Map<n
             if (esth.phone) {
               await sendPersonalSms(
                 esth.phone,
-                `Hi ${esth.name.split(" ")[0]}, your end-of-shift cash count is now overdue. Your manager has been notified. Please submit immediately via CashControl.`
+                await buildReminderMessage("sms_tpl_end_reminder_60min_suite", "Hi {first_name}, your end-of-shift cash count is now overdue. Your manager has been notified. Please submit immediately via CashControl.", { first_name: esth.name.split(" ")[0], location: loc.name })
               );
             }
 
