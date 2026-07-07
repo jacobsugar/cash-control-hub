@@ -28,20 +28,25 @@ function getOpenAIClient(): OpenAI {
 
 /**
  * Get midnight in a specific timezone as a UTC Date.
- * e.g., getMidnightInTimezone("America/Los_Angeles") returns midnight PT as UTC.
+ * e.g., getMidnightInTimezone("America/Los_Angeles") returns midnight PT as UTC (7 AM UTC during PDT).
  */
 function getMidnightInTimezone(tz: string): Date {
   const now = new Date();
-  const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz }); // "2026-06-30"
-  // Build a date string that JavaScript will interpret in the target timezone
-  // by using toLocaleString to find the UTC offset
-  const midnight = new Date(todayStr + "T00:00:00");
-  // Get the offset between UTC and the timezone
-  const utcMidnight = new Date(todayStr + "T00:00:00Z"); // midnight UTC
-  const tzTime = new Date(utcMidnight.toLocaleString("en-US", { timeZone: tz }));
-  const offsetMs = utcMidnight.getTime() - tzTime.getTime();
-  // Midnight in the timezone, expressed as UTC
-  return new Date(utcMidnight.getTime() + offsetMs);
+  const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz }); // "2026-07-07"
+
+  // Get the UTC offset for this timezone using Intl
+  const formatter = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "shortOffset" });
+  const parts = formatter.formatToParts(now);
+  const offsetPart = parts.find(p => p.type === "timeZoneName");
+  const offsetStr = offsetPart?.value || "GMT+0"; // e.g. "GMT-7"
+  const match = offsetStr.match(/GMT([+-]?\d+):?(\d+)?/);
+  const hours = parseInt(match?.[1] || "0");
+  const minutes = parseInt(match?.[2] || "0");
+  const offsetMinutes = hours * 60 + (hours < 0 ? -minutes : minutes);
+
+  // Midnight in the timezone = midnight UTC minus the offset
+  const midnightUtc = new Date(todayStr + "T00:00:00Z");
+  return new Date(midnightUtc.getTime() - offsetMinutes * 60 * 1000);
 }
 
 // In-memory SMS log for debugging and auditing
@@ -577,6 +582,9 @@ async function syncAppointmentsCache() {
       let cached = 0;
       for (const appt of appointments) {
         if (appt.state === "CANCELLED") continue;
+        // Convert to proper UTC Date objects (Boulevard returns tz-offset strings like "2026-07-01T10:00:00-07:00")
+        const startAtUtc = new Date(appt.startAt).toISOString();
+        const endAtUtc = new Date(appt.endAt).toISOString();
         const startAt = new Date(appt.startAt);
         // Only cache today's appointments (using location timezone)
         if (startAt.toLocaleDateString("en-CA", { timeZone: tz }) !== todayStr) continue;
@@ -593,7 +601,7 @@ async function syncAppointmentsCache() {
           try {
             await db.execute(sql`
               INSERT INTO cached_appointments (location_id, boulevard_appointment_id, staff_boulevard_id, staff_name, client_name, start_at, end_at, state, synced_at)
-              VALUES (${loc.id}, ${appt.id}, ${staffId}, ${staffName}, ${clientName}, ${appt.startAt}, ${appt.endAt}, ${appt.state}, NOW())
+              VALUES (${loc.id}, ${appt.id}, ${staffId}, ${staffName}, ${clientName}, ${startAtUtc}, ${endAtUtc}, ${appt.state}, NOW())
               ON CONFLICT (boulevard_appointment_id, staff_boulevard_id) DO UPDATE SET
                 client_name = EXCLUDED.client_name,
                 start_at = EXCLUDED.start_at,
