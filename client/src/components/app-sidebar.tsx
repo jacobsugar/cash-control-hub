@@ -46,6 +46,7 @@ const mainItems = [
   { title: "Reports", url: "/admin/cleanliness-reports", icon: Flag },
   { title: "SMS Log", url: "/admin/sms-log", icon: MessageSquare },
   { title: "SMS Templates", url: "/admin/sms-templates", icon: MessageSquare },
+  { title: "Alert Timing", url: "/admin/alert-timing", icon: Clock },
 ];
 
 const dataItems = [

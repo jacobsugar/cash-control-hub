@@ -29,6 +29,7 @@ import DailySchedulePage from "@/pages/admin/daily-schedule";
 import SmsLogPage from "@/pages/admin/sms-log";
 import ShiftMonitorPage from "@/pages/admin/shift-monitor";
 import SmsTemplatesPage from "@/pages/admin/sms-templates";
+import AlertTimingPage from "@/pages/admin/alert-timing";
 import { useAdminAuth } from "@/hooks/use-admin-auth";
 import { Loader2 } from "lucide-react";
 
@@ -69,6 +70,7 @@ function AdminRouter() {
         <Route path="/admin/daily-schedule" component={DailySchedulePage} />
         <Route path="/admin/sms-log" component={SmsLogPage} />
         <Route path="/admin/sms-templates" component={SmsTemplatesPage} />
+        <Route path="/admin/alert-timing" component={AlertTimingPage} />
         <Route path="/admin/logs" component={LogsPage} />
         <Route component={NotFound} />
       </Switch>

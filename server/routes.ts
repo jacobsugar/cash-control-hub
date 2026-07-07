@@ -49,6 +49,28 @@ function getMidnightInTimezone(tz: string): Date {
   return new Date(midnightUtc.getTime() - offsetMinutes * 60 * 1000);
 }
 
+// Alert timing settings (cached, refreshed every 5 minutes)
+let alertTimingCache: { startDelay: number; endDelay: number; endEscalation: number; endWindow: number } | null = null;
+let alertTimingExpiry = 0;
+
+async function getAlertTiming() {
+  if (alertTimingCache && Date.now() < alertTimingExpiry) return alertTimingCache;
+  const [startDelay, endDelay, endEscalation, endWindow] = await Promise.all([
+    storage.getSetting("alert_start_reminder_delay_min"),
+    storage.getSetting("alert_end_reminder_delay_min"),
+    storage.getSetting("alert_end_escalation_delay_min"),
+    storage.getSetting("alert_end_count_window_min"),
+  ]);
+  alertTimingCache = {
+    startDelay: parseInt(startDelay || "15"),
+    endDelay: parseInt(endDelay || "15"),
+    endEscalation: parseInt(endEscalation || "60"),
+    endWindow: parseInt(endWindow || "60"),
+  };
+  alertTimingExpiry = Date.now() + 5 * 60 * 1000;
+  return alertTimingCache;
+}
+
 // In-memory SMS log for debugging and auditing
 interface SmsLogEntry {
   recipientName: string;
@@ -360,6 +382,7 @@ async function checkShiftReminders(locations?: any[], appointmentCache?: Map<num
       }
 
       const isFlagship = loc.type === "flagship";
+      const timing = await getAlertTiming();
 
       if (isFlagship) {
         // Flagship: check if anyone submitted a start count today
@@ -372,7 +395,7 @@ async function checkShiftReminders(locations?: any[], appointmentCache?: Map<num
           if (!earliestTime || time < earliestTime) earliestTime = time;
         }
         if (!earliestTime) continue;
-        const reminderTime = new Date(earliestTime.getTime() + 15 * 60 * 1000);
+        const reminderTime = new Date(earliestTime.getTime() + timing.startDelay * 60 * 1000);
         if (now < reminderTime) continue;
 
         // Find all staff with the earliest appointment (could be tied)
@@ -405,7 +428,7 @@ async function checkShiftReminders(locations?: any[], appointmentCache?: Map<num
       } else {
         // Suite: per-esthetician check
         for (const [staffBoulevardId, firstApptTime] of staffFirstAppt) {
-          const reminderTime = new Date(firstApptTime.getTime() + 15 * 60 * 1000);
+          const reminderTime = new Date(firstApptTime.getTime() + timing.startDelay * 60 * 1000);
           if (now < reminderTime) continue;
 
           const esth = await storage.getEstheticianByBoulevardId(staffBoulevardId);
@@ -1153,7 +1176,8 @@ export async function registerRoutes(
               }
 
               if (lastApptEnd) {
-                const deadline = new Date(lastApptEnd.getTime() + 60 * 60 * 1000);
+                const endTiming = await getAlertTiming();
+                const deadline = new Date(lastApptEnd.getTime() + endTiming.endWindow * 60 * 1000);
                 if (new Date() > deadline) {
                   return res.status(400).json({
                     message: `The end-of-${isFlagship ? "day" : "shift"} count window has closed. The last appointment ended at ${lastApptEnd.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })} and you had 60 minutes to submit. Please contact a manager.`,
@@ -2019,12 +2043,12 @@ export async function registerRoutes(
     }
   });
 
-  // SMS template update (accessible to all admins, not just owners)
+  // SMS template and alert timing update (accessible to all admins, not just owners)
   app.post("/api/admin/sms-templates", requireAdmin, async (req, res) => {
     try {
       const { key, value } = req.body;
-      if (!key?.startsWith("sms_tpl_")) {
-        return res.status(400).json({ message: "Invalid template key" });
+      if (!key?.startsWith("sms_tpl_") && !key?.startsWith("alert_")) {
+        return res.status(400).json({ message: "Invalid setting key" });
       }
       await storage.upsertSetting(key, value);
       // Clear template cache
@@ -2274,6 +2298,7 @@ export async function registerRoutes(
   // ── Shift Monitor: real-time view of all shift statuses ──────────
   app.get("/api/admin/shift-monitor", requireAdmin, async (_req, res) => {
     try {
+      const monitorTiming = await getAlertTiming();
       const mappedLocations = (await storage.getBoulevardMappedLocations()).filter(
         (l) => l.active && l.boulevardLocationId
       );
@@ -2379,9 +2404,9 @@ export async function registerRoutes(
             lastClientName: staffData.lastAppt?.clientName || null,
             startCount: startRow ? { time: startRow.created_at, amount: startRow.counted_amount } : null,
             endCount: endRow ? { time: endRow.created_at, amount: endRow.counted_amount } : null,
-            startDeadline: firstApptTime ? new Date(firstApptTime.getTime() + 15 * 60 * 1000).toISOString() : null,
-            endReminderDeadline: lastApptTime ? new Date(lastApptTime.getTime() + 15 * 60 * 1000).toISOString() : null,
-            endAlertDeadline: lastApptTime ? new Date(lastApptTime.getTime() + 60 * 60 * 1000).toISOString() : null,
+            startDeadline: firstApptTime ? new Date(firstApptTime.getTime() + monitorTiming.startDelay * 60 * 1000).toISOString() : null,
+            endReminderDeadline: lastApptTime ? new Date(lastApptTime.getTime() + monitorTiming.endDelay * 60 * 1000).toISOString() : null,
+            endAlertDeadline: lastApptTime ? new Date(lastApptTime.getTime() + monitorTiming.endEscalation * 60 * 1000).toISOString() : null,
             startReminderSent,
             endReminderSent,
             endAlertSent,
@@ -2539,8 +2564,9 @@ async function checkMissingEndShifts(locations?: any[], appointmentCache?: Map<n
           }
         }
 
-        const reminderTime = new Date(locationLastApptEnd.getTime() + 15 * 60 * 1000);
-        const escalationTime = new Date(locationLastApptEnd.getTime() + 60 * 60 * 1000);
+        const endTiming = await getAlertTiming();
+        const reminderTime = new Date(locationLastApptEnd.getTime() + endTiming.endDelay * 60 * 1000);
+        const escalationTime = new Date(locationLastApptEnd.getTime() + endTiming.endEscalation * 60 * 1000);
 
         // Stage 1: 15-minute soft reminder to esthetician only
         if (now >= reminderTime) {
@@ -2622,8 +2648,9 @@ async function checkMissingEndShifts(locations?: any[], appointmentCache?: Map<n
         const hasEndCount = await storage.hasEndShiftToday(esth.id, loc.id, todayStart);
         if (hasEndCount) continue;
 
-        const reminderTime = new Date(lastApptEnd.getTime() + 15 * 60 * 1000);
-        const escalationTime = new Date(lastApptEnd.getTime() + 60 * 60 * 1000);
+        const suiteTiming = await getAlertTiming();
+        const reminderTime = new Date(lastApptEnd.getTime() + suiteTiming.endDelay * 60 * 1000);
+        const escalationTime = new Date(lastApptEnd.getTime() + suiteTiming.endEscalation * 60 * 1000);
 
         // Stage 1: 15-minute soft reminder to esthetician only
         if (now >= reminderTime) {
