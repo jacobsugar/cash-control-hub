@@ -45,6 +45,7 @@ interface MonitorData {
     locationId: number;
     locationName: string;
     marketName: string;
+    timezone: string;
     type: string;
     staff: ShiftStatus[];
   }[];
@@ -74,9 +75,9 @@ export default function ShiftMonitorPage() {
     },
   });
 
-  function formatTime(iso: string | null): string {
+  function formatTime(iso: string | null, tz?: string): string {
     if (!iso) return "-";
-    return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: tz || "America/Los_Angeles" });
   }
 
   function getTimeStatus(deadline: string | null): "pending" | "due" | "overdue" {
@@ -148,8 +149,8 @@ export default function ShiftMonitorPage() {
                           <div>
                             <p className="font-medium text-sm">{s.estheticianName}</p>
                             <p className="text-xs text-muted-foreground">
-                              {s.containerName} · First: {formatTime(s.firstAppointment)} ({s.firstClientName || "?"})
-                              {" · "}Last: {formatTime(s.lastAppointment)} ({s.lastClientName || "?"})
+                              {s.containerName} · First: {formatTime(s.firstAppointment, loc.timezone)} ({s.firstClientName || "?"})
+                              {" · "}Last: {formatTime(s.lastAppointment, loc.timezone)} ({s.lastClientName || "?"})
                             </p>
                           </div>
                           {s.phone && !s.endCount && s.lastAppointment && (
@@ -186,11 +187,11 @@ export default function ShiftMonitorPage() {
                             </div>
                             {s.startCount ? (
                               <p className="text-green-700 dark:text-green-400">
-                                Submitted at {formatTime(s.startCount.time)} · ${s.startCount.amount}
+                                Submitted at {formatTime(s.startCount.time, loc.timezone)} · ${s.startCount.amount}
                               </p>
                             ) : s.startDeadline ? (
                               <div>
-                                <p>Due by {formatTime(s.startDeadline)}</p>
+                                <p>Due by {formatTime(s.startDeadline, loc.timezone)}</p>
                                 {s.startReminderSent && (
                                   <p className="flex items-center gap-1 mt-0.5 text-orange-600">
                                     <MessageSquare className="h-2.5 w-2.5" /> Reminder sent
@@ -222,12 +223,12 @@ export default function ShiftMonitorPage() {
                             </div>
                             {s.endCount ? (
                               <p className="text-green-700 dark:text-green-400">
-                                Submitted at {formatTime(s.endCount.time)} · ${s.endCount.amount}
+                                Submitted at {formatTime(s.endCount.time, loc.timezone)} · ${s.endCount.amount}
                               </p>
                             ) : s.endAlertDeadline ? (
                               <div>
-                                <p>Reminder at {formatTime(s.endReminderDeadline)}</p>
-                                <p>Alert at {formatTime(s.endAlertDeadline)}</p>
+                                <p>Reminder at {formatTime(s.endReminderDeadline, loc.timezone)}</p>
+                                <p>Alert at {formatTime(s.endAlertDeadline, loc.timezone)}</p>
                                 {s.endReminderSent && (
                                   <p className="flex items-center gap-1 mt-0.5 text-orange-600">
                                     <MessageSquare className="h-2.5 w-2.5" /> 15-min reminder sent

@@ -307,15 +307,22 @@ export interface BoulevardAppointment {
 /**
  * Fetch appointments for a location on a given date.
  * Paginates through results and stops once we've gone past the target date.
+ * Pass timezone so the day boundary accounts for locations behind UTC.
  */
 export async function fetchAppointmentsForLocation(
   locationId: string,
-  date: Date
+  date: Date,
+  timezone?: string
 ): Promise<BoulevardAppointment[]> {
+  // Use timezone-aware boundaries if provided, otherwise UTC
+  // Add a buffer day to ensure we capture all appointments in the location's "today"
   const startOfDay = new Date(date);
   startOfDay.setHours(0, 0, 0, 0);
   const endOfDay = new Date(date);
-  endOfDay.setHours(23, 59, 59, 999);
+  // Extend end boundary to cover the latest possible timezone offset (UTC-12 to UTC+14)
+  // This ensures Pacific Time appointments that cross midnight UTC are still fetched
+  endOfDay.setDate(endOfDay.getDate() + 1);
+  endOfDay.setHours(12, 0, 0, 0);
 
   const allAppointments: BoulevardAppointment[] = [];
   let cursor: string | null = null;

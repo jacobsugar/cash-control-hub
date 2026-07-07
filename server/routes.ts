@@ -2425,6 +2425,7 @@ export async function registerRoutes(
           locationId: loc.id,
           locationName: loc.name,
           marketName: loc.marketName,
+          timezone: tz,
           type: loc.type,
           staff: staffStatuses,
         });
