@@ -1152,26 +1152,24 @@ export async function registerRoutes(
           try {
             if (loc?.boulevardLocationId) {
               const esth = await storage.getEsthetician(estheticianId);
-              const appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId, new Date());
+
+              // Use cached appointments instead of live Boulevard fetch
+              const cachedRows = await db.execute(sql`
+                SELECT staff_boulevard_id, end_at
+                FROM cached_appointments
+                WHERE location_id = ${loc.id}
+                  AND state != 'CANCELLED'
+                ORDER BY end_at DESC
+              `);
 
               let lastApptEnd: Date | null = null;
-              for (const appt of appointments) {
-                if (appt.state === "CANCELLED") continue;
-                const startDate = new Date(appt.startAt).toLocaleDateString("en-CA", { timeZone: tz });
-                if (startDate !== todayStr) continue;
-
+              for (const row of cachedRows.rows as any[]) {
                 if (isFlagship) {
-                  // Flagship: check ALL appointments at the location
-                  const endAt = new Date(appt.endAt);
+                  const endAt = new Date(row.end_at);
                   if (!lastApptEnd || endAt > lastApptEnd) lastApptEnd = endAt;
-                } else if (esth?.boulevardStaffId) {
-                  // Suite: check only this esthetician's appointments
-                  for (const svc of appt.appointmentServices) {
-                    if (svc.staff?.id === esth.boulevardStaffId) {
-                      const endAt = new Date(appt.endAt);
-                      if (!lastApptEnd || endAt > lastApptEnd) lastApptEnd = endAt;
-                    }
-                  }
+                } else if (esth?.boulevardStaffId && row.staff_boulevard_id === esth.boulevardStaffId) {
+                  const endAt = new Date(row.end_at);
+                  if (!lastApptEnd || endAt > lastApptEnd) lastApptEnd = endAt;
                 }
               }
 
