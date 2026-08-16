@@ -1092,10 +1092,10 @@ export async function registerRoutes(
         // (collected amount was already subtracted when the collection was recorded)
         priorAmount = container.currentBalance || "0.00";
         sinceDate = new Date(lastCollection!.createdAt);
-      } else if (last?.type === "end") {
-        // After an end-of-shift count, we assume all cash above the float was dropped.
+      } else if (last?.type === "end" && location?.type === "flagship") {
+        // Flagships only: after end-of-shift, all cash above the float is dropped.
         // The next start-of-shift should expect the daily float amount.
-        const dailyFloat = location?.dailyFloat || "20.00";
+        const dailyFloat = location.dailyFloat || "20.00";
         priorAmount = dailyFloat;
         sinceDate = last.createdAt ? new Date(last.createdAt) : undefined;
       } else {
