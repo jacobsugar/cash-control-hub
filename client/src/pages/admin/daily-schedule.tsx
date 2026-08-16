@@ -15,6 +15,7 @@ interface LocationSchedule {
   locationId: number;
   locationName: string;
   marketName: string;
+  timezone: string;
   staff: StaffSchedule[];
 }
 
@@ -25,8 +26,8 @@ export default function DailySchedulePage() {
     staleTime: 0,
   });
 
-  function formatTime(iso: string): string {
-    return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  function formatTime(iso: string, timezone: string): string {
+    return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: timezone });
   }
 
   return (
@@ -80,13 +81,13 @@ export default function DailySchedulePage() {
                           <TableCell>{s.firstAppointment?.clientName || "-"}</TableCell>
                           <TableCell>
                             {s.firstAppointment ? (
-                              <Badge variant="outline">{formatTime(s.firstAppointment.time)}</Badge>
+                              <Badge variant="outline">{formatTime(s.firstAppointment.time, loc.timezone)}</Badge>
                             ) : "-"}
                           </TableCell>
                           <TableCell>{s.lastAppointment?.clientName || "-"}</TableCell>
                           <TableCell>
                             {s.lastAppointment ? (
-                              <Badge variant="outline">{formatTime(s.lastAppointment.time)}</Badge>
+                              <Badge variant="outline">{formatTime(s.lastAppointment.time, loc.timezone)}</Badge>
                             ) : "-"}
                           </TableCell>
                         </TableRow>

@@ -617,16 +617,18 @@ export default function CountPage() {
             )}
 
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setStep("select")} data-testid="button-back">
-                Back
-              </Button>
-              {/* First mismatch: hide Confirm, only show Recount */}
+              {/* Hide Back button during first mismatch — only Recount should be available */}
+              {!(submitted && hasMismatch && !recounting) && (
+                <Button variant="outline" onClick={() => setStep("select")} data-testid="button-back">
+                  Back
+                </Button>
+              )}
               {!(submitted && hasMismatch && !recounting) && (
                 <Button
                   className="flex-1"
                   size="lg"
                   disabled={
-                    !countedAmount ||
+                    countedAmount === "" ||
                     submitMutation.isPending ||
                     (submitted && hasMismatch && !discrepancyNote.trim())
                   }

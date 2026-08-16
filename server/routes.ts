@@ -9,6 +9,7 @@ import fs from "fs";
 import session from "express-session";
 import OpenAI from "openai";
 import * as boulevard from "./boulevard";
+import * as bigquery from "./bigquery";
 import { getRecentLogs } from "./logBuffer";
 import { OAuth2Client } from "google-auth-library";
 
@@ -578,13 +579,20 @@ async function syncAllBoulevardLocations(syncType: "auto" | "manual" = "auto", a
 }
 
 /**
- * Sync today's appointments from Boulevard into the cached_appointments table.
- * Paginates through ALL appointments (oldest-first) until we pass today's date.
+ * Sync today's appointments into the cached_appointments table.
+ * Uses BigQuery (fast, date-filtered) with Boulevard API as fallback.
  * Only runs for active locations. Replaces existing cache for each location/day.
  */
 async function syncAppointmentsCache() {
   const mappedLocations = (await storage.getBoulevardMappedLocations()).filter(l => l.active && l.boulevardLocationId);
   const now = new Date();
+  const useBigQuery = bigquery.isConfigured();
+
+  if (useBigQuery) {
+    console.log("Syncing appointments via BigQuery");
+  } else {
+    console.log("BigQuery not configured, falling back to Boulevard API");
+  }
 
   for (const loc of mappedLocations) {
     const tz = loc.timezone || "America/Chicago";
@@ -592,8 +600,6 @@ async function syncAppointmentsCache() {
     const todayStart = getMidnightInTimezone(tz);
 
     try {
-      const appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId!, now);
-
       // Delete old cache for this location for today
       await db.delete(cachedAppointments).where(
         and(
@@ -603,28 +609,18 @@ async function syncAppointmentsCache() {
       );
 
       let cached = 0;
-      for (const appt of appointments) {
-        if (appt.state === "CANCELLED") continue;
-        // Convert to proper UTC Date objects (Boulevard returns tz-offset strings like "2026-07-01T10:00:00-07:00")
-        const startAtUtc = new Date(appt.startAt).toISOString();
-        const endAtUtc = new Date(appt.endAt).toISOString();
-        const startAt = new Date(appt.startAt);
-        // Only cache today's appointments (using location timezone)
-        if (startAt.toLocaleDateString("en-CA", { timeZone: tz }) !== todayStr) continue;
 
-        const clientName = appt.client
-          ? `${appt.client.firstName || ""} ${appt.client.lastName || ""}`.trim()
-          : "Walk-in";
+      if (useBigQuery) {
+        // BigQuery path: fast date-filtered query, endAt derived from next appointment
+        const bqAppts = await bigquery.fetchAppointmentsFromBigQuery(loc.boulevardLocationId!, now, tz);
 
-        for (const svc of appt.appointmentServices) {
-          const staffId = svc.staff?.id;
-          if (!staffId) continue;
-          const staffName = `${svc.staff.firstName || ""} ${svc.staff.lastName || ""}`.trim();
+        for (const appt of bqAppts) {
+          if (appt.state === "CANCELLED") continue;
 
           try {
             await db.execute(sql`
               INSERT INTO cached_appointments (location_id, boulevard_appointment_id, staff_boulevard_id, staff_name, client_name, start_at, end_at, state, synced_at)
-              VALUES (${loc.id}, ${appt.id}, ${staffId}, ${staffName}, ${clientName}, ${startAtUtc}, ${endAtUtc}, ${appt.state}, NOW())
+              VALUES (${loc.id}, ${appt.id}, ${appt.staffBoulevardId}, ${appt.staffName}, ${appt.clientName}, ${appt.startAt}, ${appt.endAt}, ${appt.state}, NOW())
               ON CONFLICT (boulevard_appointment_id, staff_boulevard_id) DO UPDATE SET
                 client_name = EXCLUDED.client_name,
                 start_at = EXCLUDED.start_at,
@@ -635,7 +631,43 @@ async function syncAppointmentsCache() {
             cached++;
           } catch { /* ignore duplicate */ }
         }
+      } else {
+        // Boulevard API fallback: paginates through all appointments
+        const appointments = await boulevard.fetchAppointmentsForLocation(loc.boulevardLocationId!, now);
+
+        for (const appt of appointments) {
+          if (appt.state === "CANCELLED") continue;
+          const startAtUtc = new Date(appt.startAt).toISOString();
+          const endAtUtc = new Date(appt.endAt).toISOString();
+          const startAt = new Date(appt.startAt);
+          if (startAt.toLocaleDateString("en-CA", { timeZone: tz }) !== todayStr) continue;
+
+          const clientName = appt.client
+            ? `${appt.client.firstName || ""} ${appt.client.lastName || ""}`.trim()
+            : "Walk-in";
+
+          for (const svc of appt.appointmentServices) {
+            const staffId = svc.staff?.id;
+            if (!staffId) continue;
+            const staffName = `${svc.staff.firstName || ""} ${svc.staff.lastName || ""}`.trim();
+
+            try {
+              await db.execute(sql`
+                INSERT INTO cached_appointments (location_id, boulevard_appointment_id, staff_boulevard_id, staff_name, client_name, start_at, end_at, state, synced_at)
+                VALUES (${loc.id}, ${appt.id}, ${staffId}, ${staffName}, ${clientName}, ${startAtUtc}, ${endAtUtc}, ${appt.state}, NOW())
+                ON CONFLICT (boulevard_appointment_id, staff_boulevard_id) DO UPDATE SET
+                  client_name = EXCLUDED.client_name,
+                  start_at = EXCLUDED.start_at,
+                  end_at = EXCLUDED.end_at,
+                  state = EXCLUDED.state,
+                  synced_at = NOW()
+              `);
+              cached++;
+            } catch { /* ignore duplicate */ }
+          }
+        }
       }
+
       console.log(`Cached ${cached} appointments for ${loc.name}`);
     } catch (e: any) {
       console.warn(`Failed to sync appointments for ${loc.name}: ${e.message}`);
@@ -2273,6 +2305,7 @@ export async function registerRoutes(
             locationId: loc.id,
             locationName: loc.name,
             marketName: loc.marketName,
+            timezone: loc.timezone || "America/Chicago",
             staff,
           });
         } catch (locErr: any) {
@@ -2281,6 +2314,7 @@ export async function registerRoutes(
             locationId: loc.id,
             locationName: loc.name,
             marketName: loc.marketName,
+            timezone: loc.timezone || "America/Chicago",
             staff: [],
             error: locErr.message,
           });
