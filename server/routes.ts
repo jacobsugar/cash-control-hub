@@ -1075,6 +1075,9 @@ export async function registerRoutes(
       const container = await storage.getContainer(containerId);
       if (!container) return res.status(404).json({ message: "Container not found" });
 
+      // Get location to check type and daily float
+      const location = await storage.getLocation(container.locationId);
+
       const last = await storage.getLastShiftCountForContainer(containerId);
       const lastCollection = await storage.getLastCollectionForContainer(containerId);
 
@@ -1089,6 +1092,12 @@ export async function registerRoutes(
         // (collected amount was already subtracted when the collection was recorded)
         priorAmount = container.currentBalance || "0.00";
         sinceDate = new Date(lastCollection!.createdAt);
+      } else if (last?.type === "end") {
+        // After an end-of-shift count, we assume all cash above the float was dropped.
+        // The next start-of-shift should expect the daily float amount.
+        const dailyFloat = location?.dailyFloat || "20.00";
+        priorAmount = dailyFloat;
+        sinceDate = last.createdAt ? new Date(last.createdAt) : undefined;
       } else {
         priorAmount = last?.countedAmount || container.currentBalance || "0.00";
         sinceDate = last?.createdAt ? new Date(last.createdAt) : (container.balanceUpdatedAt ? new Date(container.balanceUpdatedAt) : undefined);
@@ -1101,7 +1110,7 @@ export async function registerRoutes(
         parseFloat(priorAmount) + boulevardCash - receiptSpent
       ).toFixed(2);
 
-      console.log(`Prior calc for container ${containerId}: lastShiftId=${last?.id}, priorAmount=${priorAmount}, sinceDate=${sinceDate?.toISOString()}, blvdCash=${boulevardCash}, receipts=${receiptSpent}, expected=${expectedAmount}`);
+      console.log(`Prior calc for container ${containerId}: lastShiftId=${last?.id}, lastType=${last?.type}, priorAmount=${priorAmount}, sinceDate=${sinceDate?.toISOString()}, blvdCash=${boulevardCash}, receipts=${receiptSpent}, expected=${expectedAmount}`);
 
       res.json({ amount: priorAmount, expectedAmount });
     } catch (err: any) {
