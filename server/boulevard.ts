@@ -165,7 +165,7 @@ export async function fetchCashOrdersForLocation(
           edges {
             cursor
             node {
-              id number closedAt
+              id number closedAt state
               closedBy { firstName lastName }
               client { firstName lastName }
               summary { currentTotal }
@@ -199,8 +199,9 @@ export async function fetchCashOrdersForLocation(
         }
       }
 
-      // Skip unclosed orders
+      // Skip unclosed or voided/refunded orders
       if (!order.closedAt) continue;
+      if (order.state === "VOIDED" || order.state === "REFUNDED") continue;
 
       // Check for cash payments
       const payments = order.paymentGroups?.flatMap((g: any) => g.payments) || [];
