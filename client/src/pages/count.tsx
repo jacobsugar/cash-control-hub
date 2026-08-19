@@ -118,27 +118,6 @@ export default function CountPage() {
     }
     setSyncing(false);
 
-    // For end-of-shift, check that a start count exists today
-    if (shiftType === "end") {
-      try {
-        const checkRes = await fetch(`/api/shift-counts/check-start?estheticianId=${selectedEsthetician}&locationId=${selectedLocation}`);
-        if (checkRes.ok) {
-          const data = await checkRes.json();
-          if (!data.hasStart) {
-            toast({
-              title: "Start count required",
-              description: "You must submit a start-of-shift count before submitting an end-of-shift count.",
-              variant: "destructive",
-            });
-            setSyncing(false);
-            return;
-          }
-        }
-      } catch (e) {
-        // Don't block if the check fails
-      }
-    }
-
     // Reset count state so user always starts with a fresh blind count
     setSubmitted(false);
     setRecounting(false);
@@ -488,7 +467,7 @@ export default function CountPage() {
                               const total = Object.entries(newBills).reduce((sum, [d, count]) => {
                                 return sum + (parseInt(d) * (parseInt(count) || 0));
                               }, 0);
-                              setCountedAmount(total > 0 ? String(total) : "");
+                              setCountedAmount(String(total));
                             }}
                             data-testid={`input-bills-${denom}`}
                           />
