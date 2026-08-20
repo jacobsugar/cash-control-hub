@@ -143,9 +143,10 @@ export default function CountPage() {
     const expected = priorQuery.data?.expectedAmount || null;
     setExpectedAmount(expected);
 
-    // If amounts match, submit immediately — no second click needed
-    if (expected && parseFloat(countedAmount) === parseFloat(expected)) {
-      const isFlagship = currentLocation?.type === "flagship";
+    const isFlagship = currentLocation?.type === "flagship";
+
+    // If recount flow is disabled OR amounts match, submit immediately
+    if (!recountFlowEnabled || (expected && parseFloat(countedAmount) === parseFloat(expected))) {
       submitMutation.mutate({
         containerId: parseInt(selectedContainer),
         estheticianId: parseInt(selectedEsthetician),
@@ -205,6 +206,17 @@ export default function CountPage() {
       isRecount: recounting,
     });
   };
+
+  const { data: featureFlags } = useQuery<{ recount_flow_locations: string }>({
+    queryKey: ["/api/feature-flags"],
+    staleTime: 60_000,
+  });
+
+  const recountFlowEnabled = (() => {
+    if (!featureFlags?.recount_flow_locations || !selectedLocation) return false;
+    const enabledIds = featureFlags.recount_flow_locations.split(",").map(id => id.trim()).filter(Boolean);
+    return enabledIds.includes(selectedLocation);
+  })();
 
   const activeEstheticians = estheticians?.filter((e) => e.active) || [];
 

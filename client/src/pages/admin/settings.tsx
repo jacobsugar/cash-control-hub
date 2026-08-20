@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useState, useEffect } from "react";
-import { Settings, Save, Bell } from "lucide-react";
+import { Settings, Save, Bell, RefreshCw, BarChart3 } from "lucide-react";
 import type { AppSetting, Location } from "@shared/schema";
 
 export default function SettingsPage() {
@@ -18,6 +18,8 @@ export default function SettingsPage() {
   const [quoFromNumber, setQuoFromNumber] = useState("");
   const [shiftRemindersEnabled, setShiftRemindersEnabled] = useState(false);
   const [enabledLocationIds, setEnabledLocationIds] = useState<Set<number>>(new Set());
+  const [recountFlowLocationIds, setRecountFlowLocationIds] = useState<Set<number>>(new Set());
+  const [dailySummaryEnabled, setDailySummaryEnabled] = useState(false);
 
   const { data: settings, isLoading } = useQuery<AppSetting[]>({
     queryKey: ["/api/admin/settings"],
@@ -39,6 +41,12 @@ export default function SettingsPage() {
       if (locs?.value) {
         setEnabledLocationIds(new Set(locs.value.split(",").map(id => parseInt(id.trim())).filter(Boolean)));
       }
+      const recountLocs = settings.find((s) => s.key === "recount_flow_locations");
+      if (recountLocs?.value) {
+        setRecountFlowLocationIds(new Set(recountLocs.value.split(",").map(id => parseInt(id.trim())).filter(Boolean)));
+      }
+      const summary = settings.find((s) => s.key === "daily_summary_enabled");
+      setDailySummaryEnabled(summary?.value === "true");
     }
   }, [settings]);
 
@@ -168,6 +176,74 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="h-4 w-4 text-muted-foreground" />
+            <h3 className="font-semibold text-sm">Recount Flow</h3>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            When enabled for a location, staff must recount if their count doesn't match
+            the expected amount. When disabled, counts submit directly regardless of discrepancy.
+            SMS alerts still fire for mismatches either way.
+          </p>
+          {locations && (
+            <div className="space-y-2">
+              <Label>Enabled Locations</Label>
+              <p className="text-xs text-muted-foreground">
+                Select which locations require recounting on mismatch. None selected = disabled everywhere.
+              </p>
+              <div className="grid gap-2 mt-2">
+                {locations.map((loc) => (
+                  <label key={loc.id} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={recountFlowLocationIds.has(loc.id)}
+                      onCheckedChange={async (checked) => {
+                        const next = new Set(recountFlowLocationIds);
+                        if (checked) next.add(loc.id);
+                        else next.delete(loc.id);
+                        setRecountFlowLocationIds(next);
+                        await saveMutation.mutateAsync({
+                          key: "recount_flow_locations",
+                          value: Array.from(next).join(","),
+                        });
+                      }}
+                    />
+                    {loc.marketName} - {loc.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <h3 className="font-semibold text-sm">Daily Summary SMS</h3>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Send a daily SMS at the end of operating hours with a summary of all submitted
+            counts and expected amounts for each location.
+          </p>
+          <div className="flex items-center gap-3">
+            <Switch
+              checked={dailySummaryEnabled}
+              onCheckedChange={async (checked) => {
+                setDailySummaryEnabled(checked);
+                await saveMutation.mutateAsync({ key: "daily_summary_enabled", value: checked ? "true" : "false" });
+              }}
+            />
+            <Label>{dailySummaryEnabled ? "Enabled" : "Disabled"}</Label>
+          </div>
         </CardContent>
       </Card>
     </div>

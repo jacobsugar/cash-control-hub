@@ -828,6 +828,12 @@ async function startBoulevardAutoSync() {
     } catch (err) {
       console.error("Cleanliness escalation check error:", err);
     }
+
+    try {
+      await sendDailySummarySms();
+    } catch (err) {
+      console.error("Daily summary SMS error:", err);
+    }
   }, minutes * 60 * 1000);
 
   console.log(`Boulevard auto-sync scheduled every ${minutes} minutes`);
@@ -1016,6 +1022,17 @@ export async function registerRoutes(
   // ===== PUBLIC ROUTES (esthetician-facing, no auth) =====
 
   // Markets list
+  app.get("/api/feature-flags", async (_req, res) => {
+    try {
+      const recountLocations = await storage.getSetting("recount_flow_locations");
+      res.json({
+        recount_flow_locations: recountLocations || "",
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/markets", async (_req, res) => {
     try {
       const data = await storage.getMarkets();
@@ -2643,5 +2660,110 @@ async function checkMissingEndShifts(locations?: any[], appointmentCache?: Map<n
     }
   } catch (err) {
     console.error("Missing end-shift check error:", err);
+  }
+}
+
+let dailySummarySentDate: string | null = null;
+
+async function sendDailySummarySms() {
+  try {
+    const enabled = await storage.getSetting("daily_summary_enabled");
+    if (enabled !== "true") return;
+
+    const endStr = await storage.getSetting("sync_operating_end_hour");
+    const endHour = parseInt(endStr || "21");
+
+    const ptHour = parseInt(new Date().toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles", hour12: false, hour: "numeric" }));
+    if (ptHour < endHour) return;
+
+    const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+    if (dailySummarySentDate === todayStr) return;
+
+    const allLocations = await storage.getBoulevardMappedLocations();
+    const activeLocations = allLocations.filter(l => l.active);
+
+    const lines: string[] = [`CashControl Daily Summary (${todayStr}):`];
+
+    for (const loc of activeLocations) {
+      const tz = loc.timezone || "America/Chicago";
+      const todayStart = getMidnightInTimezone(tz);
+
+      const counts = await db.execute(sql`
+        SELECT sc.type, sc.counted_amount as "countedAmount", sc.expected_amount as "expectedAmount",
+               e.name as "estheticianName", c.name as "containerName"
+        FROM shift_counts sc
+        JOIN estheticians e ON sc.esthetician_id = e.id
+        JOIN containers c ON sc.container_id = c.id
+        WHERE c.location_id = ${loc.id}
+          AND sc.created_at >= ${todayStart}
+          AND (sc.discrepancy_note IS NULL OR sc.discrepancy_note NOT LIKE '[RECOUNT]%')
+        ORDER BY sc.created_at
+      `);
+
+      if (counts.rows.length === 0) {
+        lines.push(`\n${loc.marketName} - ${loc.name}: No counts submitted`);
+        continue;
+      }
+
+      lines.push(`\n${loc.marketName} - ${loc.name}:`);
+      for (const row of counts.rows as any[]) {
+        const label = row.type === "start" ? "Open" : "Close";
+        const match = row.expectedAmount && parseFloat(row.countedAmount) === parseFloat(row.expectedAmount);
+        const flag = match ? "" : " *";
+        const expected = row.expectedAmount ? ` (exp $${row.expectedAmount})` : "";
+        lines.push(`  ${label}: $${row.countedAmount}${expected}${flag} - ${row.estheticianName}`);
+      }
+    }
+
+    const message = lines.join("\n");
+
+    const [apiKey, fromNumberRaw, recipients] = await Promise.all([
+      storage.getSetting("quo_api_key"),
+      storage.getSetting("quo_from_number"),
+      storage.getAlertRecipients(),
+    ]);
+
+    if (!apiKey || !fromNumberRaw) {
+      console.log("Daily summary SMS not sent: Quo not configured");
+      return;
+    }
+
+    const activeRecipients = recipients.filter((r: any) => r.active);
+    if (activeRecipients.length === 0) return;
+
+    const fromNumber = formatPhoneE164(fromNumberRaw);
+
+    let userId: string | undefined;
+    if (cachedUserId && Date.now() < cachedUserId.expiresAt) {
+      userId = cachedUserId.value;
+    }
+
+    for (const recipient of activeRecipients) {
+      const toNumber = formatPhoneE164(recipient.phoneNumber);
+      const body: any = { content: message, from: fromNumber, to: [toNumber] };
+      if (userId) body.userId = userId;
+
+      try {
+        const sendRes = await fetch("https://api.openphone.com/v1/messages", {
+          method: "POST",
+          headers: { Authorization: apiKey, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (sendRes.ok) {
+          pushSmsLog({ recipientName: recipient.name || "Unknown", recipientPhone: toNumber, message, type: "alert", success: true, sentAt: new Date().toISOString() });
+        } else {
+          const errText = await sendRes.text();
+          console.error(`Daily summary SMS failed for ${recipient.name}: ${sendRes.status} ${errText}`);
+          pushSmsLog({ recipientName: recipient.name || "Unknown", recipientPhone: toNumber, message, type: "alert", success: false, error: `${sendRes.status} ${errText}`, sentAt: new Date().toISOString() });
+        }
+      } catch (err) {
+        console.error(`Daily summary SMS error for ${recipient.name}:`, err);
+      }
+    }
+
+    dailySummarySentDate = todayStr;
+    console.log(`Daily summary SMS sent for ${todayStr}`);
+  } catch (err) {
+    console.error("Daily summary SMS error:", err);
   }
 }
