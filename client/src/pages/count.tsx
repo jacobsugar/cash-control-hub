@@ -121,7 +121,7 @@ export default function CountPage() {
     // Reset count state so user always starts with a fresh blind count
     setSubmitted(false);
     setRecounting(false);
-    setCountedAmount("");
+    setCountedAmount("0");
     setBills({ "100": "", "50": "", "20": "", "10": "", "5": "", "1": "" });
     setExpectedAmount(null);
     setDiscrepancyNote("");
@@ -179,7 +179,7 @@ export default function CountPage() {
         // Reset for a new blind count
         setSubmitted(false);
         setRecounting(true);
-        setCountedAmount("");
+        setCountedAmount("0");
     setBills({ "100": "", "50": "", "20": "", "10": "", "5": "", "1": "" });
         setExpectedAmount(null);
         setDiscrepancyNote("");
