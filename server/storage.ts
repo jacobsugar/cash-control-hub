@@ -72,6 +72,7 @@ export interface IStorage {
   getBoulevardTransactions(): Promise<any[]>;
   createBoulevardTransaction(data: InsertBoulevardTransaction): Promise<BoulevardTransaction>;
   getBoulevardCashForLocation(locationId: number, since?: Date): Promise<number>;
+  getBoulevardCashForContainer(containerId: number, locationId: number, since?: Date): Promise<number>;
 
   // Alerts
   getAlerts(): Promise<Alert[]>;
@@ -591,6 +592,40 @@ export class DatabaseStorage implements IStorage {
     return parseFloat(result[0]?.total || "0");
   }
 
+  async getBoulevardCashForContainer(containerId: number, locationId: number, since?: Date) {
+    const containerCount = await db
+      .select({ count: sql<string>`COUNT(*)` })
+      .from(containers)
+      .where(eq(containers.locationId, locationId));
+    if (parseInt(containerCount[0]?.count || "1") <= 1) {
+      return this.getBoulevardCashForLocation(locationId, since);
+    }
+
+    const recentCounts = await db
+      .select({ name: estheticians.name })
+      .from(shiftCounts)
+      .innerJoin(estheticians, eq(shiftCounts.estheticianId, estheticians.id))
+      .where(eq(shiftCounts.containerId, containerId))
+      .orderBy(desc(shiftCounts.createdAt))
+      .limit(10);
+    const operatorNames = [...new Set(recentCounts.map(r => r.name))];
+
+    if (operatorNames.length === 0) {
+      return this.getBoulevardCashForLocation(locationId, since);
+    }
+
+    const conditions = [
+      eq(boulevardTransactions.locationId, locationId),
+      inArray(boulevardTransactions.operatorName, operatorNames),
+    ];
+    if (since) conditions.push(gte(boulevardTransactions.date, since));
+    const result = await db
+      .select({ total: sql<string>`COALESCE(SUM(${boulevardTransactions.amount}::numeric), 0)` })
+      .from(boulevardTransactions)
+      .where(and(...conditions));
+    return parseFloat(result[0]?.total || "0");
+  }
+
   // Alerts
   async getAlerts() {
     return db.select().from(alerts).orderBy(desc(alerts.createdAt));
@@ -827,7 +862,7 @@ export class DatabaseStorage implements IStorage {
           sinceDate = lastShift?.created_at ? new Date(lastShift.created_at) : (c.balanceUpdatedAt ? new Date(c.balanceUpdatedAt) : undefined);
         }
 
-        const boulevardCash = await this.getBoulevardCashForLocation(c.locationId, sinceDate);
+        const boulevardCash = await this.getBoulevardCashForContainer(c.id, c.locationId, sinceDate);
         const receiptSpent = await this.getReceiptsTotalForContainer(c.id, sinceDate);
         const expectedCash = (parseFloat(baseAmount) + boulevardCash - receiptSpent).toFixed(2);
         return { ...c, expectedCash };

@@ -1120,7 +1120,7 @@ export async function registerRoutes(
         sinceDate = last?.createdAt ? new Date(last.createdAt) : (container.balanceUpdatedAt ? new Date(container.balanceUpdatedAt) : undefined);
       }
 
-      const boulevardCash = await storage.getBoulevardCashForLocation(container.locationId, sinceDate);
+      const boulevardCash = await storage.getBoulevardCashForContainer(containerId, container.locationId, sinceDate);
       const receiptSpent = await storage.getReceiptsTotalForContainer(containerId, sinceDate);
 
       const expectedAmount = (
