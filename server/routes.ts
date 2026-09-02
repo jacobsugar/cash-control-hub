@@ -1089,6 +1089,7 @@ export async function registerRoutes(
   app.get("/api/containers/:containerId/prior", async (req, res) => {
     try {
       const containerId = parseInt(req.params.containerId);
+      const estheticianId = req.query.estheticianId ? parseInt(req.query.estheticianId as string) : null;
       const container = await storage.getContainer(containerId);
       if (!container) return res.status(404).json({ message: "Container not found" });
 
@@ -1105,13 +1106,9 @@ export async function registerRoutes(
       let sinceDate: Date | undefined;
 
       if (collectionTime > shiftTime) {
-        // After a collection, the remaining balance is the current container balance
-        // (collected amount was already subtracted when the collection was recorded)
         priorAmount = container.currentBalance || "0.00";
         sinceDate = new Date(lastCollection!.createdAt);
       } else if (last?.type === "end" && location?.type === "flagship") {
-        // Flagships only: after end-of-shift, all cash above the float is dropped.
-        // The next start-of-shift should expect the daily float amount.
         const dailyFloat = location.dailyFloat || "20.00";
         priorAmount = dailyFloat;
         sinceDate = last.createdAt ? new Date(last.createdAt) : undefined;
@@ -1120,14 +1117,24 @@ export async function registerRoutes(
         sinceDate = last?.createdAt ? new Date(last.createdAt) : (container.balanceUpdatedAt ? new Date(container.balanceUpdatedAt) : undefined);
       }
 
-      const boulevardCash = await storage.getBoulevardCashForContainer(containerId, container.locationId, sinceDate);
+      // For multi-suite locations with a known esthetician, use esthetician-specific cash
+      const containerCount = await storage.getContainersByLocation(container.locationId);
+      const isMultiSuite = containerCount.length > 1 && location?.type === "suite";
+
+      let boulevardCash: number;
+      if (isMultiSuite && estheticianId) {
+        boulevardCash = await storage.getBoulevardCashForEsthetician(estheticianId, container.locationId, sinceDate);
+      } else {
+        boulevardCash = await storage.getBoulevardCashForLocation(container.locationId, sinceDate);
+      }
+
       const receiptSpent = await storage.getReceiptsTotalForContainer(containerId, sinceDate);
 
       const expectedAmount = (
         parseFloat(priorAmount) + boulevardCash - receiptSpent
       ).toFixed(2);
 
-      console.log(`Prior calc for container ${containerId}: lastShiftId=${last?.id}, lastType=${last?.type}, priorAmount=${priorAmount}, sinceDate=${sinceDate?.toISOString()}, blvdCash=${boulevardCash}, receipts=${receiptSpent}, expected=${expectedAmount}`);
+      console.log(`Prior calc for container ${containerId} (esth=${estheticianId}, multiSuite=${isMultiSuite}): lastShiftId=${last?.id}, lastType=${last?.type}, priorAmount=${priorAmount}, sinceDate=${sinceDate?.toISOString()}, blvdCash=${boulevardCash}, receipts=${receiptSpent}, expected=${expectedAmount}`);
 
       res.json({ amount: priorAmount, expectedAmount });
     } catch (err: any) {

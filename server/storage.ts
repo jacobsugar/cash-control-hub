@@ -73,6 +73,7 @@ export interface IStorage {
   createBoulevardTransaction(data: InsertBoulevardTransaction): Promise<BoulevardTransaction>;
   getBoulevardCashForLocation(locationId: number, since?: Date): Promise<number>;
   getBoulevardCashForContainer(containerId: number, locationId: number, since?: Date): Promise<number>;
+  getBoulevardCashForEsthetician(estheticianId: number, locationId: number, since?: Date): Promise<number>;
 
   // Alerts
   getAlerts(): Promise<Alert[]>;
@@ -617,6 +618,22 @@ export class DatabaseStorage implements IStorage {
     const conditions = [
       eq(boulevardTransactions.locationId, locationId),
       inArray(boulevardTransactions.operatorName, operatorNames),
+    ];
+    if (since) conditions.push(gte(boulevardTransactions.date, since));
+    const result = await db
+      .select({ total: sql<string>`COALESCE(SUM(${boulevardTransactions.amount}::numeric), 0)` })
+      .from(boulevardTransactions)
+      .where(and(...conditions));
+    return parseFloat(result[0]?.total || "0");
+  }
+
+  async getBoulevardCashForEsthetician(estheticianId: number, locationId: number, since?: Date) {
+    const esth = await this.getEsthetician(estheticianId);
+    if (!esth) return 0;
+
+    const conditions = [
+      eq(boulevardTransactions.locationId, locationId),
+      eq(boulevardTransactions.operatorName, esth.name),
     ];
     if (since) conditions.push(gte(boulevardTransactions.date, since));
     const result = await db

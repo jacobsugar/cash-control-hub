@@ -61,9 +61,12 @@ export default function CountPage() {
     }
   }, [containers, selectedContainer]);
 
+  const priorQueryUrl = selectedContainer && selectedEsthetician
+    ? `/api/containers/${selectedContainer}/prior?estheticianId=${selectedEsthetician}`
+    : null;
   const priorQuery = useQuery<{ amount: string; expectedAmount: string }>({
-    queryKey: ["/api/containers", selectedContainer, "prior"],
-    enabled: !!selectedContainer && step === "count",
+    queryKey: [priorQueryUrl],
+    enabled: !!priorQueryUrl && step === "count",
     staleTime: 0,
     gcTime: 0,
   });
