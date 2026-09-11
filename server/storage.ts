@@ -17,6 +17,10 @@ import {
   type CleanlinessReport, type CleanlinessReportPhoto,
 } from "@shared/schema";
 
+// Force pg to interpret "timestamp without time zone" as UTC, not server-local time.
+// All timestamps in this DB are stored in UTC.
+pg.types.setTypeParser(1114, (str: string) => new Date(str + "+00"));
+
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 export const db = drizzle(pool);
 
