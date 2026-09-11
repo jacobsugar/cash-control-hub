@@ -1127,7 +1127,7 @@ export async function registerRoutes(
 
       let boulevardCash: number;
       if (isMultiSuite && estheticianId) {
-        boulevardCash = await storage.getBoulevardCashForEsthetician(estheticianId, container.locationId, sinceDate);
+        boulevardCash = await storage.getBoulevardCashForContainerWorkers(containerId, estheticianId, container.locationId, sinceDate);
       } else {
         boulevardCash = await storage.getBoulevardCashForLocation(container.locationId, sinceDate);
       }
@@ -1190,8 +1190,10 @@ export async function registerRoutes(
         floatNote,
       });
 
-      // Update container balance
-      await storage.updateContainerBalance(containerId, countedAmount);
+      // Only update container balance when count matches expected (Boulevard is standard of truth)
+      if (!expectedAmount || parseFloat(countedAmount) === parseFloat(expectedAmount)) {
+        await storage.updateContainerBalance(containerId, countedAmount);
+      }
 
       // Check for mismatch and create alert — only on final submission (not first-attempt recounts)
       const isRecount = discrepancyNote?.startsWith("[RECOUNT]");

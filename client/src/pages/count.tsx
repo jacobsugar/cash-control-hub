@@ -30,7 +30,6 @@ export default function CountPage() {
   const [bills, setBills] = useState<Record<string, string>>({ "100": "", "50": "", "20": "", "10": "", "5": "", "1": "" });
   const [discrepancyNote, setDiscrepancyNote] = useState("");
   const [floatNote, setFloatNote] = useState("");
-  const [priorAmount, setPriorAmount] = useState<string | null>(null);
   const [expectedAmount, setExpectedAmount] = useState<string | null>(null);
 
   const esthQueryKey = selectedLocation
@@ -136,20 +135,29 @@ export default function CountPage() {
   const [submitted, setSubmitted] = useState(false);
   const [recounting, setRecounting] = useState(false);
 
-  const hasMismatch =
-    submitted &&
-    countedAmount !== "" &&
-    expectedAmount !== null &&
-    parseFloat(countedAmount) !== parseFloat(expectedAmount);
-
   const handleSubmit = () => {
     const expected = priorQuery.data?.expectedAmount || null;
     setExpectedAmount(expected);
 
     const isFlagship = currentLocation?.type === "flagship";
 
-    // If recount flow is disabled OR amounts match, submit immediately
-    if (!recountFlowEnabled || (expected && parseFloat(countedAmount) === parseFloat(expected))) {
+    // Recount: submit directly with note — user never sees match/mismatch
+    if (recounting) {
+      submitMutation.mutate({
+        containerId: parseInt(selectedContainer),
+        estheticianId: parseInt(selectedEsthetician),
+        type: shiftType,
+        countedAmount,
+        expectedAmount: expected,
+        discrepancyNote: discrepancyNote.trim() || "Recount submission",
+        floatNote: isFlagship && shiftType === "end" && floatNote.trim() ? floatNote.trim() : null,
+        isRecount: true,
+      });
+      return;
+    }
+
+    // First count: no expected amount or amounts match — submit immediately
+    if (!expected || parseFloat(countedAmount) === parseFloat(expected)) {
       submitMutation.mutate({
         containerId: parseInt(selectedContainer),
         estheticianId: parseInt(selectedEsthetician),
@@ -158,11 +166,11 @@ export default function CountPage() {
         expectedAmount: expected,
         discrepancyNote: null,
         floatNote: isFlagship && shiftType === "end" && floatNote.trim() ? floatNote.trim() : null,
-        isRecount: recounting,
       });
       return;
     }
 
+    // First count mismatch — force recount
     setSubmitted(true);
   };
 
@@ -192,34 +200,6 @@ export default function CountPage() {
     });
   };
 
-  const handleConfirmSubmit = () => {
-    if (hasMismatch && !discrepancyNote.trim()) {
-      toast({ title: "Note required", description: "Please explain the discrepancy before submitting.", variant: "destructive" });
-      return;
-    }
-    const isFlagship = currentLocation?.type === "flagship";
-    submitMutation.mutate({
-      containerId: parseInt(selectedContainer),
-      estheticianId: parseInt(selectedEsthetician),
-      type: shiftType,
-      countedAmount,
-      expectedAmount,
-      discrepancyNote: hasMismatch ? discrepancyNote : null,
-      floatNote: isFlagship && shiftType === "end" && floatNote.trim() ? floatNote.trim() : null,
-      isRecount: recounting,
-    });
-  };
-
-  const { data: featureFlags } = useQuery<{ recount_flow_locations: string }>({
-    queryKey: ["/api/feature-flags"],
-    staleTime: 60_000,
-  });
-
-  const recountFlowEnabled = (() => {
-    if (!featureFlags?.recount_flow_locations || !selectedLocation) return false;
-    const enabledIds = featureFlags.recount_flow_locations.split(",").map(id => id.trim()).filter(Boolean);
-    return enabledIds.includes(selectedLocation);
-  })();
 
   const activeEstheticians = estheticians?.filter((e) => e.active) || [];
 
@@ -515,125 +495,77 @@ export default function CountPage() {
                       />
                     </div>
                   )}
+
+                  {recounting && (
+                    <div className="space-y-2 mt-4 pt-4 border-t">
+                      <Label htmlFor="recount-note">Note (required)</Label>
+                      <Textarea
+                        id="recount-note"
+                        placeholder="Add a note about this count..."
+                        value={discrepancyNote}
+                        onChange={(e) => setDiscrepancyNote(e.target.value)}
+                        rows={2}
+                        data-testid="input-recount-note"
+                      />
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ) : (
               <>
-                {/* First attempt mismatch: hide expected amount, just say there's a discrepancy */}
-                {hasMismatch && !recounting ? (
-                  <>
-                    <Card>
-                      <CardContent className="pt-6">
+                <Card>
+                  <CardContent className="pt-6">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Your Count</p>
+                      <p className="text-xl font-bold" data-testid="text-counted-result">
+                        ${countedAmount}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="rounded-md bg-destructive/10 p-3 border border-destructive/20">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="h-4 w-4 text-destructive mt-0.5" />
                         <div>
-                          <p className="text-xs text-muted-foreground mb-1">Your Count</p>
-                          <p className="text-xl font-bold" data-testid="text-counted-result">
-                            ${countedAmount}
+                          <p className="text-sm font-medium text-destructive">Discrepancy Detected</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Your count doesn't match the expected amount. Please recount the cash.
                           </p>
                         </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card>
-                      <CardContent className="pt-6">
-                        <div className="rounded-md bg-destructive/10 p-3 border border-destructive/20">
-                          <div className="flex items-start gap-2">
-                            <AlertTriangle className="h-4 w-4 text-destructive mt-0.5" />
-                            <div>
-                              <p className="text-sm font-medium text-destructive">Discrepancy Detected</p>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                Your count doesn't match the expected amount. Please recount the cash.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </>
-                ) : (
-                  <>
-                    {/* Recount or matching: show both amounts */}
-                    <Card>
-                      <CardContent className="pt-6">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">Your Count</p>
-                            <p className="text-xl font-bold" data-testid="text-counted-result">
-                              ${countedAmount}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">Expected Amount</p>
-                            <p className={`text-xl font-bold ${hasMismatch ? "text-destructive" : "text-green-600"}`} data-testid="text-expected-amount">
-                              ${expectedAmount ?? "0.00"}
-                            </p>
-                          </div>
-                        </div>
-                        {!hasMismatch && (
-                          <div className="mt-3 flex items-center gap-2 text-green-600">
-                            <CheckCircle2 className="h-4 w-4" />
-                            <p className="text-sm font-medium">Amounts match</p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-
-                    {hasMismatch && recounting && (
-                      <Card>
-                        <CardContent className="pt-6">
-                          <div className="rounded-md bg-destructive/10 p-3 border border-destructive/20">
-                            <div className="flex items-start gap-2">
-                              <AlertTriangle className="h-4 w-4 text-destructive mt-0.5" />
-                              <div>
-                                <p className="text-sm font-medium text-destructive">Discrepancy Detected</p>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  Expected ${expectedAmount} but you counted ${countedAmount}.
-                                  Difference: ${Math.round(parseFloat(countedAmount) - parseFloat(expectedAmount || "0"))}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="mt-3 space-y-2">
-                              <Label htmlFor="note" className="text-sm">Reason (required)</Label>
-                              <Textarea
-                                id="note"
-                                placeholder="Explain the discrepancy..."
-                                value={discrepancyNote}
-                                onChange={(e) => setDiscrepancyNote(e.target.value)}
-                                data-testid="input-discrepancy-note"
-                              />
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
-                  </>
-                )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
               </>
             )}
 
             <div className="flex gap-2">
               {/* Hide Back button during first mismatch — only Recount should be available */}
-              {!(submitted && hasMismatch && !recounting) && (
+              {!submitted && (
                 <Button variant="outline" onClick={() => setStep("select")} data-testid="button-back">
                   Back
                 </Button>
               )}
-              {!(submitted && hasMismatch && !recounting) && (
+              {!submitted && (
                 <Button
                   className="flex-1"
                   size="lg"
                   disabled={
                     countedAmount === "" ||
                     submitMutation.isPending ||
-                    (submitted && hasMismatch && !discrepancyNote.trim())
+                    (recounting && !discrepancyNote.trim())
                   }
-                  onClick={submitted ? handleConfirmSubmit : handleSubmit}
+                  onClick={handleSubmit}
                   data-testid="button-submit-count"
                 >
-                  {submitMutation.isPending ? "Submitting..." : submitted ? "Confirm & Submit" : "Submit Count"}
+                  {submitMutation.isPending ? "Submitting..." : "Submit Count"}
                 </Button>
               )}
             </div>
-            {submitted && hasMismatch && !recounting && (
+            {submitted && (
               <Button
                 variant="outline"
                 className="w-full"

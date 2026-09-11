@@ -499,7 +499,10 @@ export class DatabaseStorage implements IStorage {
     const [last] = await db
       .select()
       .from(shiftCounts)
-      .where(eq(shiftCounts.containerId, containerId))
+      .where(and(
+        eq(shiftCounts.containerId, containerId),
+        sql`(${shiftCounts.discrepancyNote} IS NULL OR ${shiftCounts.discrepancyNote} NOT LIKE '[RECOUNT]%')`
+      ))
       .orderBy(desc(shiftCounts.createdAt))
       .limit(1);
     return last;
@@ -644,6 +647,40 @@ export class DatabaseStorage implements IStorage {
       .select({ total: sql<string>`COALESCE(SUM(${boulevardTransactions.amount}::numeric), 0)` })
       .from(boulevardTransactions)
       .where(and(...conditions));
+    return parseFloat(result[0]?.total || "0");
+  }
+
+  // Sum Boulevard cash for ALL estheticians who worked at a container since a given date
+  async getBoulevardCashForContainerWorkers(containerId: number, currentEstheticianId: number, locationId: number, since?: Date) {
+    const countConditions: any[] = [eq(shiftCounts.containerId, containerId)];
+    if (since) countConditions.push(gte(shiftCounts.createdAt, since));
+
+    const recentCounters = await db
+      .selectDistinct({ estheticianId: shiftCounts.estheticianId })
+      .from(shiftCounts)
+      .where(and(...countConditions));
+
+    const estheticianIds = Array.from(new Set(
+      [...recentCounters.map(r => r.estheticianId).filter(Boolean) as number[], currentEstheticianId]
+    ));
+
+    const names: string[] = [];
+    for (let i = 0; i < estheticianIds.length; i++) {
+      const esth = await this.getEsthetician(estheticianIds[i]);
+      if (esth) names.push(esth.name);
+    }
+
+    if (names.length === 0) return 0;
+
+    const txConditions: any[] = [
+      eq(boulevardTransactions.locationId, locationId),
+      inArray(boulevardTransactions.operatorName, names),
+    ];
+    if (since) txConditions.push(gte(boulevardTransactions.date, since));
+    const result = await db
+      .select({ total: sql<string>`COALESCE(SUM(${boulevardTransactions.amount}::numeric), 0)` })
+      .from(boulevardTransactions)
+      .where(and(...txConditions));
     return parseFloat(result[0]?.total || "0");
   }
 
