@@ -80,6 +80,12 @@ export default function ShiftMonitorPage() {
     return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: tz || "America/Los_Angeles" });
   }
 
+  function tzLabel(timezone: string): string {
+    if (timezone === "America/Los_Angeles") return "PT";
+    if (timezone === "America/Chicago") return "CT";
+    return new Date().toLocaleTimeString([], { timeZone: timezone, timeZoneName: "short" }).split(" ").pop() || "";
+  }
+
   function getTimeStatus(deadline: string | null): "pending" | "due" | "overdue" {
     if (!deadline) return "pending";
     const diff = new Date(deadline).getTime() - Date.now();
@@ -130,7 +136,7 @@ export default function ShiftMonitorPage() {
           <Card key={loc.locationId}>
             <CardHeader className="pb-2">
               <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-sm">{loc.marketName} - {loc.locationName}</h3>
+                <h3 className="font-semibold text-sm">{loc.marketName} - {loc.locationName} ({tzLabel(loc.timezone)})</h3>
                 <Badge variant="outline">{loc.type}</Badge>
               </div>
             </CardHeader>

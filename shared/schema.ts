@@ -176,6 +176,7 @@ export const shiftReminders = pgTable("shift_reminders", {
 export const cleanlinessReports = pgTable("cleanliness_reports", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   locationId: integer("location_id").notNull().references(() => locations.id),
+  containerId: integer("container_id").references(() => containers.id),
   reportedByEstheticianId: integer("reported_by_esthetician_id").notNull().references(() => estheticians.id),
   previousEstheticianId: integer("previous_esthetician_id").references(() => estheticians.id),
   note: text("note").notNull(),

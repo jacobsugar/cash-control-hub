@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage, db } from "./storage";
 import { cleanlinessReports, cachedAppointments } from "@shared/schema";
-import { eq, sql, and, gte, lte } from "drizzle-orm";
+import { eq, sql, and, gte, lte, lt } from "drizzle-orm";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -152,8 +152,8 @@ async function buildAlertMessage(alertData: {
     receipt_submitted: "CashControl: Receipt submitted at {location}{container} for ${actual} by {staff}.{note_suffix}",
     missing_receipt: "CashControl Alert: Cash spent without receipt at {location}{container} for ${actual} by {staff}.{note_suffix}",
     collection_mismatch: "CashControl Alert: Collection discrepancy at {location}{container}. Expected ${expected}, collected ${actual} by {staff}.{note_suffix}",
-    cleanliness_report: "CashControl: Cleanliness issue reported at {location} by {staff}.{note_suffix}",
-    cleanliness_escalation: "CashControl ESCALATION: Unresolved cleanliness report at {location} (reported by {staff}) has been open for over 24 hours.{note_suffix}",
+    cleanliness_report: "CashControl: Cleanliness issue reported at {location}{container} by {staff}.{note_suffix}",
+    cleanliness_escalation: "CashControl ESCALATION: Unresolved cleanliness report at {location}{container} (reported by {staff}) has been open for over 24 hours.{note_suffix}",
   };
 
   const fallback = defaults[alertData.type] || "CashControl Alert: {type} at {location}{container}.";
@@ -594,13 +594,17 @@ async function syncAppointmentsCache() {
     console.log("BigQuery not configured, falling back to Boulevard API");
   }
 
+  // Clean up old cached appointments (older than 2 days) to prevent unbounded growth
+  const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+  await db.delete(cachedAppointments).where(lt(cachedAppointments.startAt, twoDaysAgo));
+
   for (const loc of mappedLocations) {
     const tz = loc.timezone || "America/Chicago";
     const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz });
     const todayStart = getMidnightInTimezone(tz);
 
     try {
-      // Delete old cache for this location for today
+      // Delete today's cache before re-syncing
       await db.delete(cachedAppointments).where(
         and(
           eq(cachedAppointments.locationId, loc.id),
@@ -1374,19 +1378,21 @@ export async function registerRoutes(
   // Create cleanliness report (public - esthetician facing)
   app.post("/api/cleanliness-reports", upload.array("photos", 10), async (req, res) => {
     try {
-      const { locationId, reportedByEstheticianId, note } = req.body;
+      const { locationId, reportedByEstheticianId, containerId, note } = req.body;
       if (!locationId || !reportedByEstheticianId || !note) {
         return res.status(400).json({ message: "locationId, reportedByEstheticianId, and note are required" });
       }
 
       const locId = parseInt(locationId);
       const reporterId = parseInt(reportedByEstheticianId);
+      const contId = containerId ? parseInt(containerId) : null;
 
       const prev = await storage.getPreviousEstheticianAtLocation(locId);
       const previousEstheticianId = prev && prev.id !== reporterId ? prev.id : null;
 
       const report = await storage.createCleanlinessReport({
         locationId: locId,
+        containerId: contId,
         reportedByEstheticianId: reporterId,
         previousEstheticianId: previousEstheticianId,
         note,
@@ -1404,9 +1410,10 @@ export async function registerRoutes(
         try { fs.unlinkSync(file.path); } catch { /* ok */ }
       }
 
-      const [loc, reporter] = await Promise.all([
+      const [loc, reporter, container] = await Promise.all([
         storage.getLocation(locId),
         storage.getEsthetician(reporterId),
+        contId ? storage.getContainer(contId) : Promise.resolve(null),
       ]);
 
       sendAlertSms({
@@ -1414,6 +1421,7 @@ export async function registerRoutes(
         marketName: loc?.marketName || null,
         staffName: reporter?.name || null,
         locationName: loc?.name || null,
+        containerName: container?.name || null,
         note,
       });
 
@@ -2177,11 +2185,16 @@ export async function registerRoutes(
 
       for (const loc of mappedLocations) {
         try {
-          // Read from DB cache
+          const tz = loc.timezone || "America/Chicago";
+          const todayStart = getMidnightInTimezone(tz);
+          const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+
           const cachedRows = await db.execute(sql`
             SELECT staff_boulevard_id, staff_name, client_name, start_at
             FROM cached_appointments
             WHERE location_id = ${loc.id}
+              AND start_at >= ${todayStart.toISOString()}
+              AND start_at < ${tomorrowStart.toISOString()}
             ORDER BY start_at
           `);
 
@@ -2266,11 +2279,13 @@ export async function registerRoutes(
         const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz });
         const todayStart = getMidnightInTimezone(tz);
 
-        // Read from DB cache instead of live API
+        const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
         const cachedRows = await db.execute(sql`
           SELECT staff_boulevard_id, staff_name, client_name, start_at, end_at
           FROM cached_appointments
           WHERE location_id = ${loc.id}
+            AND start_at >= ${todayStart.toISOString()}
+            AND start_at < ${tomorrowStart.toISOString()}
           ORDER BY start_at
         `);
 

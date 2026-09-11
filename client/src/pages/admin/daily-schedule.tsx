@@ -30,6 +30,12 @@ export default function DailySchedulePage() {
     return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: timezone });
   }
 
+  function tzLabel(timezone: string): string {
+    if (timezone === "America/Los_Angeles") return "PT";
+    if (timezone === "America/Chicago") return "CT";
+    return new Date().toLocaleTimeString([], { timeZone: timezone, timeZoneName: "short" }).split(" ").pop() || "";
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -56,7 +62,7 @@ export default function DailySchedulePage() {
             <CardHeader className="pb-2">
               <div className="flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
-                <h3 className="font-semibold text-sm">{loc.marketName} - {loc.locationName}</h3>
+                <h3 className="font-semibold text-sm">{loc.marketName} - {loc.locationName} ({tzLabel(loc.timezone)})</h3>
               </div>
             </CardHeader>
             <CardContent>

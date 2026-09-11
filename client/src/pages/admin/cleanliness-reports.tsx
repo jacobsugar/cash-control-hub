@@ -33,6 +33,7 @@ interface CleanlinessReportListItem {
   createdAt: string;
   locationName: string;
   marketName: string;
+  containerName: string | null;
   reporterName: string;
   previousEstheticianName: string | null;
   photoCount: string;
@@ -191,7 +192,7 @@ export default function CleanlinessReportsPage() {
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap mb-1">
                                 <span className="font-medium text-sm">
-                                  {report.marketName} / {report.locationName}
+                                  {report.marketName} / {report.locationName}{report.containerName ? ` — ${report.containerName}` : ""}
                                 </span>
                                 <Badge variant={report.status === "open" ? "destructive" : "secondary"}>
                                   {report.status}

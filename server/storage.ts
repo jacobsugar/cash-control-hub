@@ -1098,6 +1098,7 @@ export class DatabaseStorage implements IStorage {
         createdAt: cleanlinessReports.createdAt,
         locationName: locations.name,
         marketName: markets.name,
+        containerName: containers.name,
         reporterName: reporterEsth.name,
         previousEstheticianName: prevEsth.name,
         photoCount: sql<string>`(SELECT COUNT(*) FROM cleanliness_report_photos WHERE report_id = ${cleanlinessReports.id})`,
@@ -1107,6 +1108,7 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(markets, eq(locations.marketId, markets.id))
       .innerJoin(reporterEsth, eq(cleanlinessReports.reportedByEstheticianId, reporterEsth.id))
       .leftJoin(prevEsth, eq(cleanlinessReports.previousEstheticianId, prevEsth.id))
+      .leftJoin(containers, eq(cleanlinessReports.containerId, containers.id))
       .orderBy(desc(cleanlinessReports.createdAt));
     return result;
   }
@@ -1130,6 +1132,7 @@ export class DatabaseStorage implements IStorage {
         createdAt: cleanlinessReports.createdAt,
         locationName: locations.name,
         marketName: markets.name,
+        containerName: containers.name,
         reporterName: reporterEsth.name,
         previousEstheticianName: prevEsth.name,
       })
@@ -1138,6 +1141,7 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(markets, eq(locations.marketId, markets.id))
       .innerJoin(reporterEsth, eq(cleanlinessReports.reportedByEstheticianId, reporterEsth.id))
       .leftJoin(prevEsth, eq(cleanlinessReports.previousEstheticianId, prevEsth.id))
+      .leftJoin(containers, eq(cleanlinessReports.containerId, containers.id))
       .where(eq(cleanlinessReports.id, id));
 
     if (!report) return null;

@@ -17,7 +17,7 @@ import {
   FileImage,
 } from "lucide-react";
 import helloSugarLogo from "@/assets/hello-sugar-logo.png";
-import type { Esthetician, Location } from "@shared/schema";
+import type { Esthetician, Location, Container } from "@shared/schema";
 
 export default function ReportPage() {
   const { toast } = useToast();
@@ -28,6 +28,7 @@ export default function ReportPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedEsthetician, setSelectedEsthetician] = useState("");
   const [selectedLocation, setSelectedLocation] = useState(locationIdParam || "");
+  const [selectedContainer, setSelectedContainer] = useState("");
   const [note, setNote] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
@@ -50,6 +51,21 @@ export default function ReportPage() {
     }
   }, [locationIdParam]);
 
+  const { data: containers } = useQuery<Container[]>({
+    queryKey: ["/api/containers", selectedLocation],
+    enabled: !!selectedLocation,
+  });
+
+  useEffect(() => {
+    if (containers && containers.length === 1 && !selectedContainer) {
+      setSelectedContainer(String(containers[0].id));
+    }
+  }, [containers, selectedContainer]);
+
+  useEffect(() => {
+    setSelectedContainer("");
+  }, [selectedLocation]);
+
   const currentLocation = locations?.find((l) => String(l.id) === selectedLocation);
   const locationLabel = currentLocation
     ? `${currentLocation.marketName} - ${currentLocation.name}`
@@ -60,6 +76,7 @@ export default function ReportPage() {
       const formData = new FormData();
       formData.append("locationId", selectedLocation);
       formData.append("reportedByEstheticianId", selectedEsthetician);
+      if (selectedContainer) formData.append("containerId", selectedContainer);
       formData.append("note", note);
       for (const file of files) {
         formData.append("photos", file);
@@ -220,6 +237,24 @@ export default function ReportPage() {
                     </SelectContent>
                   </Select>
                 )}
+              </div>
+            )}
+
+            {containers && containers.length > 1 && (
+              <div className="space-y-2">
+                <Label>Suite</Label>
+                <Select value={selectedContainer} onValueChange={setSelectedContainer}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select suite" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {containers.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
           </CardContent>
