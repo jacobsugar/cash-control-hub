@@ -922,7 +922,7 @@ export class DatabaseStorage implements IStorage {
 
         const boulevardCash = await this.getBoulevardCashForContainer(c.id, c.locationId, sinceDate);
         const receiptSpent = await this.getReceiptsTotalForContainer(c.id, sinceDate);
-        const expectedCash = (parseFloat(baseAmount) + boulevardCash - receiptSpent).toFixed(2);
+        const expectedCash = String(Math.floor(parseFloat(baseAmount) + boulevardCash - receiptSpent));
         return { ...c, expectedCash };
       })
     );

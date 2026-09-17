@@ -1134,9 +1134,9 @@ export async function registerRoutes(
 
       const receiptSpent = await storage.getReceiptsTotalForContainer(containerId, sinceDate);
 
-      const expectedAmount = (
-        parseFloat(priorAmount) + boulevardCash - receiptSpent
-      ).toFixed(2);
+      const expectedAmount = String(
+        Math.floor(parseFloat(priorAmount) + boulevardCash - receiptSpent)
+      );
 
       console.log(`Prior calc for container ${containerId} (esth=${estheticianId}, multiSuite=${isMultiSuite}): lastShiftId=${last?.id}, lastType=${last?.type}, priorAmount=${priorAmount}, sinceDate=${sinceDate?.toISOString()}, blvdCash=${boulevardCash}, receipts=${receiptSpent}, expected=${expectedAmount}`);
 
@@ -2687,8 +2687,6 @@ async function checkMissingEndShifts(locations?: any[], appointmentCache?: Map<n
   }
 }
 
-let dailySummarySentDate: string | null = null;
-
 async function sendDailySummarySms() {
   try {
     const enabled = await storage.getSetting("daily_summary_enabled");
@@ -2701,7 +2699,8 @@ async function sendDailySummarySms() {
     if (ptHour < endHour) return;
 
     const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
-    if (dailySummarySentDate === todayStr) return;
+    const lastSentDate = await storage.getSetting("daily_summary_last_sent_date");
+    if (lastSentDate === todayStr) return;
 
     const allLocations = await storage.getBoulevardMappedLocations();
     const activeLocations = allLocations.filter(l => l.active);
@@ -2760,6 +2759,19 @@ async function sendDailySummarySms() {
     let userId: string | undefined;
     if (cachedUserId && Date.now() < cachedUserId.expiresAt) {
       userId = cachedUserId.value;
+    } else {
+      const phoneNumbersRes = await fetch("https://api.openphone.com/v1/phone-numbers", {
+        headers: { Authorization: apiKey },
+      });
+      if (phoneNumbersRes.ok) {
+        const phoneData = await phoneNumbersRes.json();
+        const matchingNumber = phoneData.data?.find((pn: any) => {
+          const formatted = formatPhoneE164(pn.formattedNumber || pn.phoneNumber || "");
+          return formatted === fromNumber;
+        });
+        userId = matchingNumber?.users?.[0]?.id;
+      }
+      cachedUserId = { value: userId, expiresAt: Date.now() + USER_ID_CACHE_TTL_MS };
     }
 
     for (const recipient of activeRecipients) {
@@ -2785,7 +2797,7 @@ async function sendDailySummarySms() {
       }
     }
 
-    dailySummarySentDate = todayStr;
+    await storage.upsertSetting("daily_summary_last_sent_date", todayStr);
     console.log(`Daily summary SMS sent for ${todayStr}`);
   } catch (err) {
     console.error("Daily summary SMS error:", err);
