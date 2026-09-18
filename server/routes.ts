@@ -774,6 +774,19 @@ async function startBoulevardAutoSync() {
       } catch (err) {
         console.error("Boulevard auto-sync error:", err);
       }
+
+      // Staff sync once per day (phone numbers, roles, locations)
+      try {
+        const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+        const lastStaffSync = await storage.getSetting("staff_sync_last_date");
+        if (lastStaffSync !== todayStr) {
+          const staffResult = await syncStaffFromBoulevard();
+          await storage.upsertSetting("staff_sync_last_date", todayStr);
+          console.log(`Daily staff sync: ${staffResult.synced} staff synced across ${staffResult.locations} locations`);
+        }
+      } catch (err) {
+        console.error("Daily staff sync error:", err);
+      }
     }
 
     // Sync today's appointments into the database cache
