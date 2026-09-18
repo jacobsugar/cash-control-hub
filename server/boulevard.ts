@@ -263,7 +263,7 @@ export async function fetchAllStaffWithLocations(): Promise<BoulevardStaffWithLo
   const staff: BoulevardStaffWithLocations[] = [];
   let cursor: string | null = null;
 
-  for (let page = 0; page < 100; page++) {
+  for (let page = 0; page < 500; page++) {
     const data: any = await graphql(
       `query($after: String) {
         staff(first: 50, after: $after) {
