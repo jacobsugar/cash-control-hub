@@ -2703,17 +2703,25 @@ async function checkMissingEndShifts(locations?: any[], appointmentCache?: Map<n
 async function sendDailySummarySms() {
   try {
     const enabled = await storage.getSetting("daily_summary_enabled");
-    if (enabled !== "true") return;
+    if (enabled !== "true") {
+      console.log("Daily summary skipped: not enabled");
+      return;
+    }
 
     const endStr = await storage.getSetting("sync_operating_end_hour");
     const endHour = parseInt(endStr || "21");
 
     const ptHour = parseInt(new Date().toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles", hour12: false, hour: "numeric" }));
-    if (ptHour < endHour) return;
+    if (ptHour < endHour) {
+      return;
+    }
 
     const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
     const lastSentDate = await storage.getSetting("daily_summary_last_sent_date");
-    if (lastSentDate === todayStr) return;
+    if (lastSentDate === todayStr) {
+      return;
+    }
+    console.log(`Daily summary: preparing for ${todayStr} (PT hour: ${ptHour}, endHour: ${endHour})`);
 
     const allLocations = await storage.getBoulevardMappedLocations();
     const activeLocations = allLocations.filter(l => l.active);
@@ -2752,6 +2760,7 @@ async function sendDailySummarySms() {
     }
 
     const message = lines.join("\n");
+    console.log(`Daily summary: ${activeLocations.length} locations, message ${message.length} chars`);
 
     const [apiKey, fromNumberRaw, recipients] = await Promise.all([
       storage.getSetting("quo_api_key"),
@@ -2765,9 +2774,13 @@ async function sendDailySummarySms() {
     }
 
     const activeRecipients = recipients.filter((r: any) => r.active);
-    if (activeRecipients.length === 0) return;
+    if (activeRecipients.length === 0) {
+      console.log("Daily summary skipped: no active recipients");
+      return;
+    }
 
     const fromNumber = formatPhoneE164(fromNumberRaw);
+    console.log(`Daily summary: sending to ${activeRecipients.length} recipients from ${fromNumber}`);
 
     let userId: string | undefined;
     if (cachedUserId && Date.now() < cachedUserId.expiresAt) {
@@ -2787,6 +2800,11 @@ async function sendDailySummarySms() {
       cachedUserId = { value: userId, expiresAt: Date.now() + USER_ID_CACHE_TTL_MS };
     }
 
+    if (!userId) {
+      console.log("Daily summary: warning — no userId resolved for fromNumber");
+    }
+
+    let successCount = 0;
     for (const recipient of activeRecipients) {
       const toNumber = formatPhoneE164(recipient.phoneNumber);
       const body: any = { content: message, from: fromNumber, to: [toNumber] };
@@ -2799,6 +2817,7 @@ async function sendDailySummarySms() {
           body: JSON.stringify(body),
         });
         if (sendRes.ok) {
+          successCount++;
           pushSmsLog({ recipientName: recipient.name || "Unknown", recipientPhone: toNumber, message, type: "alert", success: true, sentAt: new Date().toISOString() });
         } else {
           const errText = await sendRes.text();
@@ -2810,8 +2829,12 @@ async function sendDailySummarySms() {
       }
     }
 
-    await storage.upsertSetting("daily_summary_last_sent_date", todayStr);
-    console.log(`Daily summary SMS sent for ${todayStr}`);
+    if (successCount > 0) {
+      await storage.upsertSetting("daily_summary_last_sent_date", todayStr);
+      console.log(`Daily summary SMS sent for ${todayStr}: ${successCount}/${activeRecipients.length} delivered`);
+    } else {
+      console.error(`Daily summary SMS: all ${activeRecipients.length} sends failed — will retry next interval`);
+    }
   } catch (err) {
     console.error("Daily summary SMS error:", err);
   }
