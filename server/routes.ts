@@ -2726,7 +2726,7 @@ async function sendDailySummarySms() {
     const allLocations = await storage.getBoulevardMappedLocations();
     const activeLocations = allLocations.filter(l => l.active);
 
-    const lines: string[] = [`CashControl Daily Summary (${todayStr}):`];
+    const locationBlocks: string[] = [];
 
     for (const loc of activeLocations) {
       const tz = loc.timezone || "America/Chicago";
@@ -2745,22 +2745,37 @@ async function sendDailySummarySms() {
       `);
 
       if (counts.rows.length === 0) {
-        lines.push(`\n${loc.marketName} - ${loc.name}: No counts submitted`);
+        locationBlocks.push(`${loc.name}: No counts`);
         continue;
       }
 
-      lines.push(`\n${loc.marketName} - ${loc.name}:`);
+      const countLines: string[] = [];
       for (const row of counts.rows as any[]) {
-        const label = row.type === "start" ? "Open" : "Close";
+        const label = row.type === "start" ? "O" : "C";
         const match = row.expectedAmount && parseFloat(row.countedAmount) === parseFloat(row.expectedAmount);
-        const flag = match ? "" : " *";
-        const expected = row.expectedAmount ? ` (exp $${row.expectedAmount})` : "";
-        lines.push(`  ${label}: $${row.countedAmount}${expected}${flag} - ${row.estheticianName}`);
+        const flag = match ? "" : "*";
+        const expected = !match && row.expectedAmount ? ` (exp $${row.expectedAmount})` : "";
+        const firstName = (row.estheticianName || "").split(" ")[0];
+        countLines.push(`  ${label}: $${row.countedAmount}${expected}${flag} - ${firstName}`);
       }
+      locationBlocks.push(`${loc.name}:\n${countLines.join("\n")}`);
     }
 
-    const message = lines.join("\n");
-    console.log(`Daily summary: ${activeLocations.length} locations, message ${message.length} chars`);
+    const header = `CashControl Summary ${todayStr}`;
+    const MAX_SMS_LEN = 1550;
+
+    const messages: string[] = [];
+    let current = header;
+    for (const block of locationBlocks) {
+      if (current.length + 2 + block.length > MAX_SMS_LEN) {
+        messages.push(current);
+        current = `${header} (cont.)`;
+      }
+      current += `\n\n${block}`;
+    }
+    messages.push(current);
+
+    console.log(`Daily summary: ${activeLocations.length} locations, ${messages.length} message(s), ${messages.map(m => m.length).join("/")} chars`);
 
     const [apiKey, fromNumberRaw, recipients] = await Promise.all([
       storage.getSetting("quo_api_key"),
@@ -2807,25 +2822,28 @@ async function sendDailySummarySms() {
     let successCount = 0;
     for (const recipient of activeRecipients) {
       const toNumber = formatPhoneE164(recipient.phoneNumber);
-      const body: any = { content: message, from: fromNumber, to: [toNumber] };
-      if (userId) body.userId = userId;
 
-      try {
-        const sendRes = await fetch("https://api.openphone.com/v1/messages", {
-          method: "POST",
-          headers: { Authorization: apiKey, "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        if (sendRes.ok) {
-          successCount++;
-          pushSmsLog({ recipientName: recipient.name || "Unknown", recipientPhone: toNumber, message, type: "alert", success: true, sentAt: new Date().toISOString() });
-        } else {
-          const errText = await sendRes.text();
-          console.error(`Daily summary SMS failed for ${recipient.name}: ${sendRes.status} ${errText}`);
-          pushSmsLog({ recipientName: recipient.name || "Unknown", recipientPhone: toNumber, message, type: "alert", success: false, error: `${sendRes.status} ${errText}`, sentAt: new Date().toISOString() });
+      for (const msg of messages) {
+        const body: any = { content: msg, from: fromNumber, to: [toNumber] };
+        if (userId) body.userId = userId;
+
+        try {
+          const sendRes = await fetch("https://api.openphone.com/v1/messages", {
+            method: "POST",
+            headers: { Authorization: apiKey, "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (sendRes.ok) {
+            successCount++;
+            pushSmsLog({ recipientName: recipient.name || "Unknown", recipientPhone: toNumber, message: msg, type: "alert", success: true, sentAt: new Date().toISOString() });
+          } else {
+            const errText = await sendRes.text();
+            console.error(`Daily summary SMS failed for ${recipient.name}: ${sendRes.status} ${errText}`);
+            pushSmsLog({ recipientName: recipient.name || "Unknown", recipientPhone: toNumber, message: msg, type: "alert", success: false, error: `${sendRes.status} ${errText}`, sentAt: new Date().toISOString() });
+          }
+        } catch (err) {
+          console.error(`Daily summary SMS error for ${recipient.name}:`, err);
         }
-      } catch (err) {
-        console.error(`Daily summary SMS error for ${recipient.name}:`, err);
       }
     }
 

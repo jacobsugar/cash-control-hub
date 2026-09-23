@@ -315,21 +315,84 @@ export async function fetchAppointmentsForLocation(
   date: Date,
   timezone?: string
 ): Promise<BoulevardAppointment[]> {
-  // Use timezone-aware boundaries if provided, otherwise UTC
-  // Add a buffer day to ensure we capture all appointments in the location's "today"
   const startOfDay = new Date(date);
   startOfDay.setHours(0, 0, 0, 0);
   const endOfDay = new Date(date);
-  // Extend end boundary to cover the latest possible timezone offset (UTC-12 to UTC+14)
-  // This ensures Pacific Time appointments that cross midnight UTC are still fetched
   endOfDay.setDate(endOfDay.getDate() + 1);
   endOfDay.setHours(12, 0, 0, 0);
 
+  // Try reverse pagination (newest first) to avoid scanning thousands of old records
+  try {
+    return await fetchAppointmentsReverse(locationId, startOfDay, endOfDay);
+  } catch (err: any) {
+    console.log(`Reverse appointment pagination not supported (${err.message}), using forward`);
+    return await fetchAppointmentsForward(locationId, startOfDay, endOfDay);
+  }
+}
+
+async function fetchAppointmentsReverse(
+  locationId: string,
+  startOfDay: Date,
+  endOfDay: Date,
+): Promise<BoulevardAppointment[]> {
   const allAppointments: BoulevardAppointment[] = [];
   let cursor: string | null = null;
 
-  // Paginate until we pass the target date or run out of data
-  // With ~50 appointments per page, 500 pages = 25,000 appointments max
+  for (let page = 0; page < 100; page++) {
+    if (page > 0 && page % 20 === 0) {
+      console.log(`Appointment fetch (rev) page ${page} for location ${locationId}, found ${allAppointments.length} so far...`);
+    }
+    const data: any = await graphql(
+      `query($locationId: ID!, $before: String) {
+        appointments(last: 50, locationId: $locationId, before: $before) {
+          edges {
+            node {
+              id startAt endAt state
+              client { firstName lastName }
+              appointmentServices {
+                staff { id firstName lastName }
+              }
+            }
+          }
+          pageInfo { hasPreviousPage startCursor }
+        }
+      }`,
+      { locationId, before: cursor },
+      0 // no retries — if it fails, fall back to forward
+    );
+
+    const edges = data.appointments?.edges || [];
+    if (edges.length === 0) break;
+
+    let foundPastDate = false;
+    for (const edge of edges) {
+      const appt = edge.node;
+      const startAt = new Date(appt.startAt);
+
+      if (startAt <= endOfDay && new Date(appt.endAt) >= startOfDay) {
+        allAppointments.push(appt);
+      }
+
+      if (startAt < startOfDay) {
+        foundPastDate = true;
+      }
+    }
+
+    if (foundPastDate || !data.appointments?.pageInfo?.hasPreviousPage) break;
+    cursor = data.appointments.pageInfo.startCursor;
+  }
+
+  return allAppointments;
+}
+
+async function fetchAppointmentsForward(
+  locationId: string,
+  startOfDay: Date,
+  endOfDay: Date,
+): Promise<BoulevardAppointment[]> {
+  const allAppointments: BoulevardAppointment[] = [];
+  let cursor: string | null = null;
+
   for (let page = 0; page < 500; page++) {
     if (page > 0 && page % 50 === 0) {
       console.log(`Appointment fetch page ${page} for location ${locationId}, found ${allAppointments.length} so far...`);
@@ -360,12 +423,10 @@ export async function fetchAppointmentsForLocation(
       const appt = edge.node;
       const startAt = new Date(appt.startAt);
 
-      // Only include appointments that overlap with the target date
       if (startAt <= endOfDay && new Date(appt.endAt) >= startOfDay) {
         allAppointments.push(appt);
       }
 
-      // If we've gone past the target date, stop paginating
       if (startAt > endOfDay) {
         foundFutureDate = true;
       }
