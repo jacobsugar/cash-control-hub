@@ -498,10 +498,10 @@ export default function CountPage() {
 
                   {recounting && (
                     <div className="space-y-2 mt-4 pt-4 border-t">
-                      <Label htmlFor="recount-note">Note (required)</Label>
+                      <Label htmlFor="recount-note">Note (optional)</Label>
                       <Textarea
                         id="recount-note"
-                        placeholder="Add a note about this count..."
+                        placeholder="Optional — explain the discrepancy"
                         value={discrepancyNote}
                         onChange={(e) => setDiscrepancyNote(e.target.value)}
                         rows={2}
@@ -555,8 +555,7 @@ export default function CountPage() {
                   size="lg"
                   disabled={
                     countedAmount === "" ||
-                    submitMutation.isPending ||
-                    (recounting && !discrepancyNote.trim())
+                    submitMutation.isPending
                   }
                   onClick={handleSubmit}
                   data-testid="button-submit-count"
